@@ -1,7 +1,9 @@
 import os
 import argparse
-from PIL import Image
+from PIL import Image, ImageOps
 
+
+# COLOR -----------------------------------------------------------------------
 
 palettes = {
     "morn": {
@@ -69,12 +71,6 @@ def is_same_color(tile_tones, palette_tones):
     return match
 
 
-def handle_palette(palette_name):
-    palette_8bit = {k: [convert_to_8bit_rgb(
-        c) for c in v] for k, v in palettes[palette_name].items()}
-    return palette_8bit
-
-
 def convert_to_5bit_rgb(color):
     return tuple((c * 31) // 255 for c in color)
 
@@ -83,51 +79,46 @@ def convert_to_8bit_rgb(color):
     return tuple((c * 255) // 31 for c in color)
 
 
-def divide_into_metatiles(image):
-    width, height = image.size
-    metatiles = []
-    for y in range(0, height, 32):
-        for x in range(0, width, 32):
-            metatile = image.crop((x, y, x + 32, y + 32))
-            metatiles.append(metatile)
-    return metatiles
+def palette_to_8bit_rgb(palette_name):
+    palette_8bit = {k: [convert_to_8bit_rgb(
+        c) for c in v] for k, v in palettes[palette_name].items()}
+    return palette_8bit
 
 
-def identify_unique_metatiles(metatiles):
-    unique_metatiles = []
-    metatile_positions = []
-    for i, metatile in enumerate(metatiles):
-        if metatile not in unique_metatiles:
-            unique_metatiles.append(metatile)
-        metatile_positions.append(unique_metatiles.index(metatile))
-    return unique_metatiles, metatile_positions
+def tile_to_grayscale(tile, map_color_grays):
+    grayscale = {
+        0: (255, 255, 255),
+        1: (170, 170, 170),
+        2: (85, 85, 85),
+        3: (0, 0, 0)
+    }
+    grays = {gray: grayscale[position]
+             for gray, position in map_color_grays.items()}
+    new_tile = Image.new('RGB', (8, 8))
+    for y in range(8):
+        for x in range(8):
+            pixel = tile.getpixel((x, y))
+            new_tile.putpixel(
+                (x, y), grays.get(pixel, (255, 255, 255)))
+    return new_tile
 
 
-def divide_metatiles_into_tiles(unique_metatiles, palette):
-    unique_tiles = []
-    tile_colors = []
-    tile_grays = []
+def tile_to_color(tile, map_color_grays):
+    grayscale = {
+        (255, 255, 255): 0,
+        (170, 170, 170): 1,
+        (85, 85, 85): 2,
+        (0, 0, 0): 3
+    }
 
-    for metatile in unique_metatiles:
-        for y in range(0, 32, 8):
-            for x in range(0, 32, 8):
-                tile = metatile.crop((x, y, x + 8, y + 8))
-                if tile not in unique_tiles:
-                    unique_tiles.append(tile)
-
-    get_roof_colors(unique_tiles, palette)
-
-    for tile in unique_tiles:
-        tile_tones = set(tile.getpixel((i % 8, i // 8)) for i in range(64))
-        tile_tones = sorted(tile_tones, key=lambda c: (
-            0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]), reverse=True)
-        color, positions = get_tile_palette_color(tile_tones, palette)
-        tile_colors.append(color)
-        tile_grays.append(positions)
-
-        print(color, positions)
-
-    return unique_tiles, tile_colors, tile_grays
+    color_tile = Image.new('RGB', (8, 8))
+    for y in range(8):
+        for x in range(8):
+            gray_pixel = tile.getpixel((x, y))
+            gray_index = grayscale.get(gray_pixel, 0)
+            tone = next(key for key, value in map_color_grays.items() if value == gray_index)
+            color_tile.putpixel((x, y), tone)
+    return color_tile
 
 
 def get_roof_colors(unique_tiles, palette):
@@ -154,7 +145,8 @@ def get_roof_colors(unique_tiles, palette):
         if is_roof(tile_tones, palette):
             roof_tones.append(tile_tones)
 
-    palette['ROOF'] = unique_sublists(roof_tones)[0] if unique_sublists(roof_tones) else palette['ROOF']
+    palette['ROOF'] = unique_sublists(roof_tones)[0] if unique_sublists(
+        roof_tones) else palette['ROOF']
 
 
 def get_tile_palette_color(tile_tones, palette):
@@ -180,54 +172,141 @@ def get_tile_palette_color(tile_tones, palette):
     return color_name, matching_positions[color_name]
 
 
-def save_tileset_image(tiles, tile_grays, output_path, grayscale=True):
-    tileset_image = Image.new('RGB', (128, 96), (255, 255, 255))
+# PROCESS ---------------------------------------------------------------------
 
-    if grayscale:
-        grayscale = {
-            0: (255, 255, 255),
-            1: (170, 170, 170),
-            2: (85, 85, 85),
-            3: (0, 0, 0)
+
+def divide_into_metatiles(image):
+    width, height = image.size
+    metatiles = []
+    for y in range(0, height, 32):
+        for x in range(0, width, 32):
+            metatile = image.crop((x, y, x + 32, y + 32))
+            metatiles.append(metatile)
+    return metatiles
+
+
+def identify_unique_metatiles(metatiles):
+    unique_metatiles = []
+    metatile_positions = []
+    for i, metatile in enumerate(metatiles):
+        if metatile not in unique_metatiles:
+            unique_metatiles.append(metatile)
+        metatile_positions.append(unique_metatiles.index(metatile))
+    return unique_metatiles, metatile_positions
+
+
+def identify_unique_tiles(unique_metatiles, palette):
+    unique_tiles = []
+    tile_colors = []
+    map_color_grays = []
+
+    for metatile in unique_metatiles:
+        for y in range(0, 32, 8):
+            for x in range(0, 32, 8):
+                tile = metatile.crop((x, y, x + 8, y + 8))
+                if tile not in unique_tiles:
+                    unique_tiles.append(tile)
+
+    get_roof_colors(unique_tiles, palette)
+
+    for tile in unique_tiles:
+        tile_tones = set(tile.getpixel((i % 8, i // 8)) for i in range(64))
+        tile_tones = sorted(tile_tones, key=lambda c: (
+            0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]), reverse=True)
+        color, positions = get_tile_palette_color(tile_tones, palette)
+        tile_colors.append(color)
+        map_color_grays.append(positions)
+        # print(color, positions)
+
+    return unique_tiles, tile_colors, map_color_grays
+
+
+def compress_tiles(tiles, tile_colors, map_color_grays):
+    compressed_tiles = []
+    transformations = []
+
+    for i, tile in enumerate(tiles):
+        gray_tile = tile_to_grayscale(tile, map_color_grays[i])
+        color = tile_colors[i]
+        variants = {
+            'original': gray_tile,
+            'flip_x': ImageOps.mirror(gray_tile),
+            'flip_y': ImageOps.flip(gray_tile),
+            'flip_xy': ImageOps.flip(ImageOps.mirror(gray_tile))
         }
 
-        for i, tile in enumerate(tiles):
-            grays = {gray: grayscale[position]
-                     for gray, position in tile_grays[i].items()}
-            new_tile = Image.new('RGB', (8, 8))
-            for y in range(8):
-                for x in range(8):
-                    pixel = tile.getpixel((x, y))
-                    new_tile.putpixel(
-                        (x, y), grays.get(pixel, (255, 255, 255)))
+        found = False
+        for variant_name, variant_tile in variants.items():
+            for j, comp_tile in enumerate(compressed_tiles):
+                if variant_tile.tobytes() == comp_tile.tobytes():
+                    flip_x = 'flip_x' in variant_name or 'flip_xy' in variant_name
+                    flip_y = 'flip_y' in variant_name or 'flip_xy' in variant_name
+                    transformations.append((j, flip_x, flip_y, color))
 
-            x = (i % 16) * 8
-            y = (i // 16) * 8
-            tileset_image.paste(new_tile, (x, y))
+                    # Reapply transformations to original tile
+                    retransformed_tile = reapply_transformations(comp_tile, flip_x, flip_y, map_color_grays[i])
 
-    else:
-        for i, tile in enumerate(tiles):
-            x = (i % 16) * 8
-            y = (i // 16) * 8
-            tileset_image.paste(tile, (x, y))
+                    # Debugging
+                    # tile.save(f"debug/{i}_original_tile.png")
+                    # gray_tile.save(f"debug/{i}_gray_tile.png")
+                    # retransformed_tile.save(f"debug/{i}_retransformed_tile_{variant_name}.png")
 
-    tileset_image.save(output_path)
+                    assert retransformed_tile.tobytes() == tile.tobytes(), \
+                        f"Transformation error: tile {i}, variant {variant_name}, flip_x={flip_x}, flip_y={flip_y}, color={color}"
+
+                    found = True
+                    break
+            if found:
+                break
+
+        if not found:
+            compressed_tiles.append(gray_tile)
+            transformations.append(
+                (len(compressed_tiles) - 1, False, False, color))
+
+    return compressed_tiles, transformations
 
 
-def save_metatiles_binary(metatiles, tiles, output_path):
-    with open(output_path, 'wb') as f:
-        for metatile in metatiles:
-            for y in range(0, 32, 8):
-                for x in range(0, 32, 8):
-                    tile = metatile.crop((x, y, x + 8, y + 8))
-                    tile_index = tiles.index(tile)
-                    f.write(tile_index.to_bytes(1, 'big'))
+def reapply_transformations(tile, flip_x, flip_y, map_color_grays):
+    if flip_x:
+        tile = ImageOps.mirror(tile)
+    if flip_y:
+        tile = ImageOps.flip(tile)
+    recolored_tile = tile_to_color(tile, map_color_grays)
+    return recolored_tile
 
 
-def save_blk_file(output_path, metatile_positions):
-    with open(output_path, 'wb') as f:
-        for position in metatile_positions:
-            f.write(position.to_bytes(1, 'big'))
+def get_attr_metatiles(metatiles, compressed_tiles, transformations, map_color_grays):
+    attr_metatiles = []
+
+    for metatile in metatiles:
+        metatile_info = []
+        for y in range(0, 32, 8):
+            for x in range(0, 32, 8):
+                tile = metatile.crop((x, y, x + 8, y + 8))
+                for i, (compressed_index, flip_x, flip_y, color) in enumerate(transformations):
+                    retransformed_tile = reapply_transformations(compressed_tiles[compressed_index], flip_x, flip_y, map_color_grays[i])
+                    if tile.tobytes() == retransformed_tile.tobytes():
+                        compressed_index = compressed_index % 0x80
+                        metatile_info.append((compressed_index, color, flip_x, flip_y))
+                        break
+        attr_metatiles.append(metatile_info)
+
+    return attr_metatiles
+
+
+# FILES -----------------------------------------------------------------------
+
+
+def ensure_file(base_dir, file_name):
+    makefile_path = os.path.join(base_dir, file_name)
+    if not os.path.exists(makefile_path):
+        with open(makefile_path, 'w') as f:
+            f.write("# Generated by Metatiled\n")
+            f.write(
+                "# Polished Map assumes a directory with a Makefile is the main project directory.\n")
+            f.write(
+                "# Polished Map++ assumes a directory with a Main.asm is the main project directory.\n")
 
 
 def ensure_directories(base_dir):
@@ -242,17 +321,48 @@ def ensure_directories(base_dir):
             os.makedirs(path)
 
 
-def ensure_makefile(base_dir):
-    makefile_path = os.path.join(base_dir, "Makefile")
-    if not os.path.exists(makefile_path):
-        with open(makefile_path, 'w') as f:
-            f.write("# Generated by Metatiled\n")
-            f.write(
-                "# Polished Map assumes a directory with a Makefile is the main project directory.\n")
-            f.write("\n")
+# SAVE ------------------------------------------------------------------------
 
 
-def generate_asm_file(colors, output_path):
+def save_blk_file(output_path, metatile_positions):
+    with open(output_path, 'wb') as f:
+        for position in metatile_positions:
+            f.write(position.to_bytes(1, 'big'))
+
+
+# blk -------------------------------------------------------------------------
+
+
+def save_tileset_image(tiles, map_color_grays, output_path, grayscale=True):
+    tileset_image = Image.new('RGB', (128, 96), (255, 255, 255))
+
+    if grayscale:
+        for i, tile in enumerate(tiles):
+            new_tile = tile_to_grayscale(tile, map_color_grays[i])
+            x = (i % 16) * 8
+            y = (i // 16) * 8
+            tileset_image.paste(new_tile, (x, y))
+
+    else:
+        for i, tile in enumerate(tiles):
+            x = (i % 16) * 8
+            y = (i // 16) * 8
+            tileset_image.paste(tile, (x, y))
+
+    tileset_image.save(output_path)
+
+
+def save_metatiles_bin_file(metatiles, tiles, output_path):
+    with open(output_path, 'wb') as f:
+        for metatile in metatiles:
+            for y in range(0, 32, 8):
+                for x in range(0, 32, 8):
+                    tile = metatile.crop((x, y, x + 8, y + 8))
+                    tile_index = tiles.index(tile)
+                    f.write(tile_index.to_bytes(1, 'big'))
+
+
+def save_asm_file(colors, output_path):
     lines = []
 
     # Section 1
@@ -278,59 +388,125 @@ def generate_asm_file(colors, output_path):
         line = "\ttilepal 1, " + ", ".join(line_colors)
         lines.append(line)
 
-    # Línea vacía al final
     lines.append("")
 
-    # Escribir las líneas al archivo
     with open(output_path, 'w') as f:
         for line in lines:
             f.write(line + '\n')
 
 
+# ablk ------------------------------------------------------------------------
+
+
+def save_compressed_tileset_image(tiles, output_path):
+    tileset_image = Image.new('RGB', (128, 96), (255, 255, 255))
+
+    for i, tile in enumerate(tiles):
+        x = (i % 16) * 8
+        y = (i // 16) * 8
+        tileset_image.paste(tile, (x, y))
+
+    tileset_image.save(output_path)
+
+
+def save_attr_metatiles_bin_file(attr_metatiles, output_path):
+    with open(output_path, 'wb') as f:
+        for metatile_info in attr_metatiles:
+            for compressed_index, color, flip_x, flip_y in metatile_info:
+                f.write(bytes([compressed_index]))
+
+
+def save_attributes_bin_file(attr_metatiles, palette, output_path):
+    with open(output_path, 'wb') as f:
+        for metatile_info in attr_metatiles:
+            for compressed_index, color, flip_x, flip_y in metatile_info:
+                color_index = list(palette.keys()).index(color)
+                attributes = color_index & 0x07
+                if compressed_index >= 0x80:
+                    attributes |= 0x08  # Set bank 1
+                if flip_x:
+                    attributes |= 0x20
+                if flip_y:
+                    attributes |= 0x40
+                f.write(bytes([attributes]))
+
+
+# -----------------------------------------------------------------------------
+
+
 def main():
     parser = argparse.ArgumentParser(
-        description='Process a Pokemon map for GameBoy Color.')
+        description='Convert an image (PNG) to a map.')
     parser.add_argument('map_image', type=str,
                         help='Name of the map image file (PNG).')
     parser.add_argument('--palette', '-p', type=str,
                         help='Name of the palette to use.', required=True)
+    parser.add_argument('--compress', '-c', action='store_true',
+                        help='Apply additional compression to tiles.')
 
     args = parser.parse_args()
 
-    map_image = args.map_image
+    map_name = args.map_image
     palette_name = args.palette
+    compress = args.compress
 
-    base_dir = os.path.dirname(map_image)
-    base_name = os.path.splitext(os.path.basename(map_image))[0]
-
-    ensure_directories(base_dir)
-    ensure_makefile(base_dir)
-
-    # Process map
-    map_image = Image.open(map_image)
-    palette = handle_palette(palette_name)
+    map_image = Image.open(map_name)
+    palette = palette_to_8bit_rgb(palette_name)
     metatiles = divide_into_metatiles(map_image)
     unique_metatiles, metatile_positions = identify_unique_metatiles(metatiles)
-    tiles, tile_colors, tile_grays = divide_metatiles_into_tiles(
+    tiles, tile_colors, map_color_grays = identify_unique_tiles(
         unique_metatiles, palette)
 
-    # Save files
-    tileset_image_path = os.path.join(
-        base_dir, 'gfx', 'tilesets', f'{base_name}.png')
-    save_tileset_image(tiles, tile_grays, tileset_image_path, grayscale=True)
+    base_dir = os.path.dirname(map_name)
+    base_name = os.path.splitext(os.path.basename(map_name))[0]
+    ensure_directories(base_dir)
 
-    metatiles_binary_path = os.path.join(
-        base_dir, 'data', 'tilesets', f'{base_name}_metatiles.bin')
-    save_metatiles_binary(unique_metatiles, tiles, metatiles_binary_path)
+    if not compress:
+        ensure_file(base_dir, 'Makefile')
 
-    blk_file_name = ''.join([word.capitalize()
-                            for word in base_name.split('_')]) + '.blk'
-    blk_file_path = os.path.join(base_dir, 'maps', blk_file_name)
-    save_blk_file(blk_file_path, metatile_positions)
+        blk_file_name = ''.join([word.capitalize()
+                                for word in base_name.split('_')]) + '.blk'
+        blk_file_path = os.path.join(base_dir, 'maps', blk_file_name)
+        save_blk_file(blk_file_path, metatile_positions)
 
-    asm_file_path = os.path.join(
-        base_dir, 'gfx', 'tilesets', f'{base_name}_palette_map.asm')
-    generate_asm_file(tile_colors, asm_file_path)
+        tileset_image_path = os.path.join(
+            base_dir, 'gfx', 'tilesets', f'{base_name}.png')
+        save_tileset_image(tiles, map_color_grays,
+                           tileset_image_path, grayscale=True)
+
+        metatiles_binary_path = os.path.join(
+            base_dir, 'data', 'tilesets', f'{base_name}_metatiles.bin')
+        save_metatiles_bin_file(unique_metatiles, tiles, metatiles_binary_path)
+
+        asm_file_path = os.path.join(
+            base_dir, 'gfx', 'tilesets', f'{base_name}_palette_map.asm')
+        save_asm_file(tile_colors, asm_file_path)
+    else:
+        compressed_tiles, transformations = compress_tiles(
+            tiles, tile_colors, map_color_grays)
+        attr_metatiles = get_attr_metatiles(unique_metatiles, compressed_tiles, transformations, map_color_grays)
+
+        ensure_file(base_dir, 'Main.asm')
+
+        compressed_tileset_image_path = os.path.join(
+            base_dir, 'gfx', 'tilesets', f'{base_name}.png')
+        save_compressed_tileset_image(
+            compressed_tiles, compressed_tileset_image_path)
+
+        metatiles_binary_path = os.path.join(
+            base_dir, 'data', 'tilesets', f'{base_name}_metatiles.bin')
+        save_attr_metatiles_bin_file(attr_metatiles, metatiles_binary_path)
+
+        attributes_binary_path = os.path.join(
+            base_dir, 'data', 'tilesets', f'{base_name}_attributes.bin')
+        save_attributes_bin_file(attr_metatiles, palette, attributes_binary_path)
+
+        ablk_file_name = ''.join([word.capitalize()
+                                  for word in base_name.split('_')]) + '.ablk'
+        ablk_file_path = os.path.join(base_dir, 'maps', ablk_file_name)
+        save_blk_file(ablk_file_path, metatile_positions)
+
+    print('Done!')
 
 
 if __name__ == "__main__":
