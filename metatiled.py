@@ -334,7 +334,10 @@ def save_blk_file(output_path, metatile_positions):
 
 
 def save_tileset_image(tiles, map_color_grays, output_path, grayscale=True):
-    tileset_image = Image.new('RGB', (128, 96), (255, 255, 255))
+    num_rows = (len(tiles) + 15) // 16
+    height = num_rows * 8
+
+    tileset_image = Image.new('RGB', (128, height), (255, 255, 255))
 
     if grayscale:
         for i, tile in enumerate(tiles):
@@ -399,7 +402,10 @@ def save_asm_file(colors, output_path):
 
 
 def save_compressed_tileset_image(tiles, output_path):
-    tileset_image = Image.new('RGB', (128, 96), (255, 255, 255))
+    num_rows = (len(tiles) + 15) // 16
+    height = num_rows * 8
+
+    tileset_image = Image.new('RGB', (128, height), (255, 255, 255))
 
     for i, tile in enumerate(tiles):
         x = (i % 16) * 8
