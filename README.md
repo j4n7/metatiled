@@ -21,11 +21,11 @@ Additionally, this program allows compressing the tilesets for the .ablk format,
 ## Usage
 
 ```sh
-python3 metatiled.py <map_image> --palette <palette_name> [--compress]
+python3 metatiled.py <map_image> [--palette <palette_name>] [--compress]
 ```
 or
 ```sh
-python3 metatiled.py <map_image> -p <palette_name> [-c]
+python3 metatiled.py <map_image> [-p <palette_name>] [-c]
 ```
 
 ### Positional Arguments
@@ -34,14 +34,16 @@ python3 metatiled.py <map_image> -p <palette_name> [-c]
 
 ### Flags
 
-- `--palette`, `-p`: Name of the palette to use that corresponds to the image. This argument is required.
+- `--palette`, `-p`: Name of the palette to use that corresponds to the image. This argument is optional.
 - `--compress`, `-c`: Apply additional compression to the tiles. This argument is optional.
 
 ## Notes
 
-- Ensure that the map image is in PNG format.
-- The `--palette` option is required and must specify one of the available palettes. You have to make sure your image is using the that palette. All colors must be contained in that palette, except the 4 ones that are used for the roofs. 
-- The `--compress` option is optional and, if used, will apply additional compression to the tiles.
+- Ensure that the map image is in PNG format and is using a supported palette.
+- The map image can have 1 custom color (made of 4 tones) not defined by the palette.
+- The program should autodetect the palette. If you are having trouble use next argument.
+- The `--palette` option is not required and must specify one of the available palettes. You have to make sure your image is using the that palette. All colors must be contained in that palette, except the 4 ones that are used for the roofs. 
+- The `--compress` option is not required and, if used, will apply additional compression to the tiles.
 
 ## Examples
 
@@ -52,7 +54,11 @@ Use the provided `pallet_town.png` image. Then you can use [Polished Map](https:
 To generate **blk** files compatible with pokecrystal:
 
 ```sh
-python metatiled.py pallet_town.png --palette day
+python metatiled.py examples/maps/pallet_town.png
+```
+or
+```sh
+python metatiled.py examples/maps/pallet_town.png --palette day
 ```
 
 This command converts the image `pallet_town.png` using the `day` palette and generates the necessary files without applying additional compression.
@@ -62,7 +68,7 @@ This command converts the image `pallet_town.png` using the `day` palette and ge
 To generate **ablk** files compatible with polishedcrystal:
 
 ```sh
-python metatiled.py pallet_town.png --palette day --compress
+python metatiled.py examples/maps/pallet_town.png --compress
 ```
 
 This command converts the image `pallet_town.png` using the `day` palette and applies additional compression to the tiles.
@@ -101,7 +107,6 @@ Each palette contains different color tones used to convert the map image.
 
 ## TODO
 
-- Auto-detect palettes
 - Support for monochrome palettes
 - Support for custom palettes
 - Collision and priority masks
