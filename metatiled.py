@@ -154,6 +154,11 @@ def identify_palette(tile_color_tones, palettes):
                     palette_scores[palette_name] += 1
                     break
 
+    total_score = sum(palette_scores.values())
+    if total_score == 0:
+        print('Palette: monochrome')
+        return 'monochrome'
+
     palette_name = max(palette_scores, key=palette_scores.get)
     print(f'Palette: {palette_name}')
 
@@ -161,6 +166,8 @@ def identify_palette(tile_color_tones, palettes):
 
 
 def get_roof_colors(unique_tiles, palette):
+    '''For monochrome maps and roof tiles.'''
+
     def is_roof(tile_tones, palette):
         for color_name, palette_tones in palette.items():
             if all(any(is_same_tone(tile_tone, palette_tone) for palette_tone in palette_tones) for tile_tone in tile_tones):
@@ -227,6 +234,7 @@ def identify_unique_metatiles(metatiles):
 
 
 def identify_unique_tiles(unique_metatiles, palettes, palette=None):
+    monocrhome = False
     unique_tiles = []
     tile_color_tones = []
     tile_color_names = []
@@ -245,6 +253,9 @@ def identify_unique_tiles(unique_metatiles, palettes, palette=None):
     if not palette:
         tile_color_tones = process_partial_colors(tile_color_tones)
         palette_name = identify_palette(tile_color_tones, palettes)
+        if palette_name == 'monochrome':
+            monocrhome = True
+            palette_name = 'morn'
         palette = palettes[palette_name]
 
     get_roof_colors(unique_tiles, palette)
@@ -256,7 +267,7 @@ def identify_unique_tiles(unique_metatiles, palettes, palette=None):
         color_to_grays.append(positions)
         # print(color, positions)
 
-    return unique_tiles, tile_color_names, color_to_grays
+    return unique_tiles, tile_color_names, color_to_grays, monocrhome
 
 
 def compress_tiles(tiles, tile_color_names, color_to_grays):
@@ -503,7 +514,7 @@ def main():
     palette = palettes_8bit_rgb[palette_name] if palette_name else None
     metatiles = divide_into_metatiles(map_image)
     unique_metatiles, metatile_positions = identify_unique_metatiles(metatiles)
-    tiles, tile_color_names, color_to_grays = identify_unique_tiles(
+    tiles, tile_color_names, color_to_grays, monochrome = identify_unique_tiles(
         unique_metatiles, palettes_8bit_rgb, palette)
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -527,9 +538,10 @@ def main():
             base_dir, 'data', 'tilesets', f'{base_name}_metatiles.bin')
         save_metatiles_bin_file(unique_metatiles, tiles, metatiles_binary_path)
 
-        asm_file_path = os.path.join(
-            base_dir, 'gfx', 'tilesets', f'{base_name}_palette_map.asm')
-        save_asm_file(tile_color_names, asm_file_path)
+        if not monochrome:
+            asm_file_path = os.path.join(
+                base_dir, 'gfx', 'tilesets', f'{base_name}_palette_map.asm')
+            save_asm_file(tile_color_names, asm_file_path)
     else:
         compressed_tiles, transformations = compress_tiles(
             tiles, tile_color_names, color_to_grays)
