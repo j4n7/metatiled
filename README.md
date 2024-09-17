@@ -10,6 +10,21 @@ A small Python application that converts an image in PNG format to a map compati
 
 I see this as a complementary tool for [Polished Map](https://github.com/Rangi42/polished-map) and [Polished Map++](https://github.com/Rangi42/polished-map/tree/plusplus) made by legendary Rangi42.
 
+<p align="center"><b>Original image:</b></p>
+<p align="center">
+<img src="https://raw.githubusercontent.com/j4n7/metatiled/refs/heads/master/examples/maps/pallet_town.png?raw=true" alt="Pallet Town Map" width="320" height="288">
+</p>
+
+<p align="center"><b>Generated tileset (blk):</b></p>
+<p align="center">
+<img src="https://raw.githubusercontent.com/j4n7/metatiled/refs/heads/master/examples/tilesets/pallet_town_blk.png?raw=true" alt="Pallet Town Tileset">
+</p>
+
+<p align="center"><b>Generated compressed tileset (ablk):</b></p>
+<p align="center">
+<img src="https://raw.githubusercontent.com/j4n7/metatiled/refs/heads/master/examples/tilesets/pallet_town_ablk.png?raw=true" alt="Pallet Town Compressed Tileset">
+</p>
+
 ## Why?
 
 So far, there is no program that allows generating the necessary files to create a compatible map with the mentioned ROMs almost from scratch. 
