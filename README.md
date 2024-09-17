@@ -25,6 +25,23 @@ I see this as a complementary tool for [Polished Map](https://github.com/Rangi42
 <img src="https://raw.githubusercontent.com/j4n7/metatiled/refs/heads/master/examples/tilesets/pallet_town_ablk.png?raw=true" alt="Pallet Town Compressed Tileset">
 </p>
 
+<br>
+
+<p align="center"><b>Original image:</b></p>
+<p align="center">
+<img src="https://raw.githubusercontent.com/j4n7/metatiled/refs/heads/master/examples/maps/fonto.png?raw=true" alt="Pallet Town Map" width="320" height="288">
+</p>
+
+<p align="center"><b>Generated tileset (blk):</b></p>
+<p align="center">
+<img src="https://raw.githubusercontent.com/j4n7/metatiled/refs/heads/master/examples/tilesets/fonto_blk.png?raw=true" alt="Pallet Town Tileset">
+</p>
+
+<p align="center"><b>Generated compressed tileset (ablk):</b></p>
+<p align="center">
+<img src="https://raw.githubusercontent.com/j4n7/metatiled/refs/heads/master/examples/tilesets/fonto_ablk.png?raw=true" alt="Pallet Town Compressed Tileset">
+</p>
+
 ## Why?
 
 So far, there is no program that allows generating the necessary files to create a compatible map with the mentioned ROMs almost from scratch. 
@@ -55,6 +72,7 @@ python3 metatiled.py <map_image> [-p <palette_name>] [-c]
 ## Notes
 
 - Ensure that the map image is in PNG format and is using a supported palette.
+- It supports maps with a monocrhome palette (just 4 tones).
 - The map image can have 1 custom color (made of 4 tones) not defined by the palette.
 - The program should autodetect the palette. If you are having trouble use next argument.
 - The `--palette` option is not required and must specify one of the available palettes. You have to make sure your image is using the that palette. All colors must be contained in that palette, except the 4 ones that are used for the roofs. 
@@ -122,10 +140,10 @@ Each palette contains different color tones used to convert the map image.
 
 ## TODO
 
-- Support for monochrome palettes
 - Support for custom palettes
 - Collision and priority masks
 - Graphical interface
 - Auto-import references directly into the ROM project
+- Implement validation mechanisms
 
 ---
