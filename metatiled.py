@@ -79,6 +79,14 @@ def convert_to_8bit_rgb(color):
     return tuple((c * 255) // 31 for c in color)
 
 
+def rgb_to_hex(rgb):
+    return ''.join(f'{value:02X}' for value in rgb)
+
+
+def hex_to_rgb(hex_color):
+    return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+
+
 def palettes_to_8bit_rgb(palettes):
     palettes_8bit = {
         palette_name: {
@@ -210,6 +218,33 @@ def get_tile_palette_color(tile_tones, palette):
     return color_name, matching_positions[color_name]
 
 
+def load_custom_palette(image_path):
+    txt_path = image_path.replace('.png', '.txt')
+    if not os.path.exists(txt_path):
+        return None
+
+    print('Custom palette found!')
+
+    custom_palette = {}
+    with open(txt_path, 'r') as f:
+        lines = f.read().strip().split('\n')
+        i = 0
+        while i < len(lines):
+            color_name = lines[i].strip()
+            if color_name:
+                tones = []
+                for j in range(1, 5):
+                    if i + j < len(lines):
+                        tone = lines[i + j].strip()
+                        if tone:
+                            tones.append(hex_to_rgb(tone))
+                        else:
+                            tones.append((0, 0, 0))
+                custom_palette[color_name] = tones
+            i += 6  # Next color (name + 4 tones + blank line)
+    return custom_palette
+
+
 # PROCESS ---------------------------------------------------------------------
 
 
@@ -250,8 +285,15 @@ def identify_unique_tiles(unique_metatiles, palettes, palette=None):
                     if tile_tones not in tile_color_tones:
                         tile_color_tones.append(tile_tones)
 
+    if palette == 'extract':
+        tile_color_tones = process_partial_colors(tile_color_tones)
+        print(f'Unique colors: {len(tile_color_tones)}')
+        return tile_color_tones, None, None, None
+
     if not palette:
         tile_color_tones = process_partial_colors(tile_color_tones)
+        print(f'Unique colors: {len(tile_color_tones)}')
+
         palette_name = identify_palette(tile_color_tones, palettes)
         if palette_name == 'monochrome':
             monocrhome = True
@@ -382,6 +424,30 @@ def save_blk_file(output_path, metatile_positions):
             f.write(position.to_bytes(1, 'big'))
 
 
+def save_palette_txt_file(image_path, palette):
+    with open(f"{image_path[:-4]}.txt", "w") as file:
+        for i, color_tones in enumerate(palette):
+            file.write("?\n")
+            for tone in color_tones:
+                file.write(f"{rgb_to_hex(tone)}\n")
+            for _ in range(4 - len(color_tones)):
+                file.write("------\n")
+            if i < len(palette) - 1:
+                file.write("\n")
+
+
+def save_pal_file(pal_path, custom_palette):
+    color_order = palettes['morn'].keys()
+
+    with open(pal_path, 'w') as file:
+        for color_name in color_order:
+            file.write(f"; {color_name.lower()}\n")
+            tones = custom_palette.get(color_name, [(0, 0, 0)] * 4)
+            for tone in tones:
+                r, g, b = convert_to_5bit_rgb(tone)
+                file.write(f"\tRGB {r:02}, {g:02}, {b:02}\n")
+
+
 # blk -------------------------------------------------------------------------
 
 
@@ -443,11 +509,12 @@ def save_asm_file(colors, output_path):
         line = "\ttilepal 1, " + ", ".join(line_colors)
         lines.append(line)
 
-    lines.append("")
-
     with open(output_path, 'w') as f:
-        for line in lines:
-            f.write(line + '\n')
+        for i, line in enumerate(lines):
+            if i < len(lines) - 1:
+                f.write(line + '\n')
+            else:
+                f.write(line)
 
 
 # ablk ------------------------------------------------------------------------
@@ -503,23 +570,45 @@ def main():
                         help='Specify palette to use (avoid auto-detect).')
     parser.add_argument('--compress', '-c', action='store_true',
                         help='Apply additional compression to tiles.')
+    parser.add_argument('--extract-palette', '-e', action='store_true',
+                        help='Extract the palette from the image.')
 
     args = parser.parse_args()
 
-    map_name = args.map_image
+    map_path = args.map_image
     palette_name = args.palette
     compress = args.compress
+    extract_palette = args.extract_palette
 
-    map_image = Image.open(map_name)
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    base_name = os.path.splitext(os.path.basename(map_path))[0]
+    ensure_directories(base_dir)
+
     palette = palettes_8bit_rgb[palette_name] if palette_name else None
+    palette = 'extract' if extract_palette else palette
+
+    custom_palette = load_custom_palette(map_path) if not palette else None
+
+    if custom_palette:
+        palettes_8bit_rgb['custom'] = custom_palette
+        palette = custom_palette
+
+        pal_file_path = os.path.join(
+            base_dir, 'gfx', 'tilesets', f'{base_name}.pal')
+        save_pal_file(pal_file_path, palette)
+
+    map_image = Image.open(map_path)
     metatiles = divide_into_metatiles(map_image)
     unique_metatiles, metatile_positions = identify_unique_metatiles(metatiles)
     tiles, tile_color_names, color_to_grays, monochrome = identify_unique_tiles(
         unique_metatiles, palettes_8bit_rgb, palette)
 
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    base_name = os.path.splitext(os.path.basename(map_name))[0]
-    ensure_directories(base_dir)
+    if extract_palette:
+        palette_colors = tiles
+        save_palette_txt_file(map_path, palette_colors)
+
+        print('Done!')
+        return
 
     if not compress:
         ensure_file(base_dir, 'Makefile')

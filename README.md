@@ -140,7 +140,6 @@ Each palette contains different color tones used to convert the map image.
 
 ## TODO
 
-- Support for custom palettes
 - Collision and priority masks
 - Graphical interface
 - Auto-import references directly into the ROM project
