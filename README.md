@@ -10,7 +10,7 @@ A small Python application that converts an image in PNG format to a map compati
 
 I see this as a complementary tool for [Polished Map](https://github.com/Rangi42/polished-map) and [Polished Map++](https://github.com/Rangi42/polished-map/tree/plusplus) made by legendary Rangi42.
 
-<p align="center"><b>Original image:</b></p>
+<p align="center"><b>Original image (default palette):</b></p>
 <p align="center">
 <img src="https://raw.githubusercontent.com/j4n7/metatiled/refs/heads/master/examples/maps/pallet_town.png?raw=true" alt="Pallet Town Map" width="320" height="288">
 </p>
@@ -27,19 +27,36 @@ I see this as a complementary tool for [Polished Map](https://github.com/Rangi42
 
 <br>
 
-<p align="center"><b>Original image:</b></p>
+<p align="center"><b>Original image (monochrome palette):</b></p>
 <p align="center">
-<img src="https://raw.githubusercontent.com/j4n7/metatiled/refs/heads/master/examples/maps/fonto.png?raw=true" alt="Pallet Town Map" width="320" height="288">
+<img src="https://raw.githubusercontent.com/j4n7/metatiled/refs/heads/master/examples/maps/fonto.png?raw=true" alt="Fonto Map" width="320" height="288">
 </p>
 
 <p align="center"><b>Generated tileset (blk):</b></p>
 <p align="center">
-<img src="https://raw.githubusercontent.com/j4n7/metatiled/refs/heads/master/examples/tilesets/fonto_blk.png?raw=true" alt="Pallet Town Tileset">
+<img src="https://raw.githubusercontent.com/j4n7/metatiled/refs/heads/master/examples/tilesets/fonto_blk.png?raw=true" alt="Fonto Tileset">
 </p>
 
 <p align="center"><b>Generated compressed tileset (ablk):</b></p>
 <p align="center">
-<img src="https://raw.githubusercontent.com/j4n7/metatiled/refs/heads/master/examples/tilesets/fonto_ablk.png?raw=true" alt="Pallet Town Compressed Tileset">
+<img src="https://raw.githubusercontent.com/j4n7/metatiled/refs/heads/master/examples/tilesets/fonto_ablk.png?raw=true" alt="Fonto Compressed Tileset">
+</p>
+
+<br>
+
+<p align="center"><b>Original image (custom palette):</b></p>
+<p align="center">
+<img src="https://raw.githubusercontent.com/j4n7/metatiled/refs/heads/master/examples/maps/new_bark_town.png?raw=true" alt="New Bark Town Map" width="320" height="288">
+</p>
+
+<p align="center"><b>Generated tileset (blk):</b></p>
+<p align="center">
+<img src="https://raw.githubusercontent.com/j4n7/metatiled/refs/heads/master/examples/tilesets/new_bark_town_blk.png?raw=true" alt="New Bark Town Tileset">
+</p>
+
+<p align="center"><b>Generated compressed tileset (ablk):</b></p>
+<p align="center">
+<img src="https://raw.githubusercontent.com/j4n7/metatiled/refs/heads/master/examples/tilesets/new_bark_town_ablk.png?raw=true" alt="New Bark Town Compressed Tileset">
 </p>
 
 ## Why?
@@ -60,6 +77,17 @@ or
 python3 metatiled.py <map_image> [-p <palette_name>] [-c]
 ```
 
+<br>
+
+To extract colors and tones from an image:
+```sh
+python3 metatiled.py <map_image> [--extract-palette]
+```
+or
+```sh
+python3 metatiled.py <map_image> [-e]
+```
+
 ### Positional Arguments
 
 - `<map_image>`: Name of the map image file in PNG format.
@@ -68,15 +96,18 @@ python3 metatiled.py <map_image> [-p <palette_name>] [-c]
 
 - `--palette`, `-p`: Name of the palette to use that corresponds to the image. This argument is optional.
 - `--compress`, `-c`: Apply additional compression to the tiles. This argument is optional.
+- `--extract-palette`, `-e`: Generate a txt file with the palette of the map. This argument is optional.
 
 ## Notes
 
 - Ensure that the map image is in PNG format and is using a supported palette.
 - It supports maps with a monocrhome palette (just 4 tones).
+- It supports maps with a custom palette provided you include a txt file with the used colors. See the example folder to understand the format you need to use or use `--extract-palette`.
 - The map image can have 1 custom color (made of 4 tones) not defined by the palette.
 - The program should autodetect the palette. If you are having trouble use next argument.
 - The `--palette` option is not required and must specify one of the available palettes. You have to make sure your image is using the that palette. All colors must be contained in that palette, except the 4 ones that are used for the roofs. 
 - The `--compress` option is not required and, if used, will apply additional compression to the tiles.
+- The `--extract-palette` option is not required and is meant to be used alone. It will generate a txt file with the palette of the map. That file will still require some manual adjustments.
 
 ## Examples
 
@@ -126,9 +157,9 @@ Depending on whether the `--compress` option is used, the program will generate 
 - `data/tilesets/<MapName>_metatiles.bin`: Binary file with the compressed metatiles.
 - `data/tilesets/<MapName>_attributes.bin`: Binary file with the metatile attributes.
 
-## Available Palettes
+## Available Default Palettes
 
-The available palettes are:
+The available default palettes are:
 
 - `morn`
 - `day`
