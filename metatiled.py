@@ -80,7 +80,7 @@ def convert_to_8bit_rgb(color):
 
 
 def rgb_to_hex(rgb):
-    return ''.join(f'{value:02X}' for value in rgb)
+    return ''.join(f'{value:02X}' for value in rgb[:-1])
 
 
 def hex_to_rgb(hex_color):
@@ -96,6 +96,12 @@ def palettes_to_8bit_rgb(palettes):
         for palette_name, colors in palettes.items()
     }
     return palettes_8bit
+
+
+def sort_palette(tones):
+    '''Sort using luminance formula'''
+    return sorted(tones, key=lambda c: (
+        0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]), reverse=True)
 
 
 def tile_to_grayscale(tile, color_to_grays):
@@ -137,8 +143,7 @@ def tile_to_color(tile, color_to_grays):
 
 def get_tile_tones(tile):
     tile_tones = set(tile.getpixel((i % 8, i // 8)) for i in range(64))
-    tile_tones = sorted(tile_tones, key=lambda c: (
-        0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]), reverse=True)
+    tile_tones = sort_palette(tile_tones)
     return tile_tones
 
 
@@ -185,9 +190,7 @@ def get_roof_colors(unique_tiles, palette):
     roof_tones = []
     for tile in unique_tiles:
         tile_tones = set(tile.getpixel((i % 8, i // 8)) for i in range(64))
-        # Sort using luminance formula
-        tile_tones = sorted(tile_tones, key=lambda c: (
-            0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]), reverse=True)
+        tile_tones = sort_palette(tile_tones)
         if is_roof(tile_tones, palette):
             roof_tones.append(tile_tones)
 
@@ -251,47 +254,60 @@ def load_custom_palette(image_path):
 def divide_into_metatiles(image):
     width, height = image.size
     metatiles = []
+    positions = []
     for y in range(0, height, 32):
         for x in range(0, width, 32):
             metatile = image.crop((x, y, x + 32, y + 32))
             metatiles.append(metatile)
-    return metatiles
+            positions.append((x // 32 + 1, y // 32 + 1))
+    return metatiles, positions
 
 
-def identify_unique_metatiles(metatiles):
+def identify_unique_metatiles(metatiles, positions):
     unique_metatiles = []
     metatile_positions = []
+    metatile_indexes = []
     for i, metatile in enumerate(metatiles):
         if metatile not in unique_metatiles:
             unique_metatiles.append(metatile)
-        metatile_positions.append(unique_metatiles.index(metatile))
-    return unique_metatiles, metatile_positions
+            metatile_positions.append(positions[i])
+        metatile_indexes.append(unique_metatiles.index(metatile))
+    print('Unique metatiles:', len(unique_metatiles))
+    return unique_metatiles, metatile_positions, metatile_indexes
 
 
-def identify_unique_tiles(unique_metatiles, palettes, palette=None):
+def identify_unique_tiles(unique_metatiles, metatile_positions, palettes, palette=None):
     monocrhome = False
     unique_tiles = []
     tile_color_tones = []
     tile_color_names = []
     color_to_grays = []
 
-    for metatile in unique_metatiles:
+    for i, metatile in enumerate(unique_metatiles):
         for y in range(0, 32, 8):
             for x in range(0, 32, 8):
                 tile = metatile.crop((x, y, x + 8, y + 8))
                 if tile not in unique_tiles:
                     unique_tiles.append(tile)
                     tile_tones = get_tile_tones(tile)
+                    if len(tile_tones) > 4:
+                        raise SystemExit(
+                            f'[Error] Tile ({x // 8 + 1}, {y // 8 + 1}) in metatile {metatile_positions[i]} has more than 4 colors. Analyze the map first.')
                     if tile_tones not in tile_color_tones:
                         tile_color_tones.append(tile_tones)
 
+    print(f'Unique tiles: {len(unique_tiles)}', '(> 192)' if len(unique_tiles) > 192 else '')
+
+    tile_color_tones = process_partial_colors(tile_color_tones)
+
     if palette == 'extract':
-        tile_color_tones = process_partial_colors(tile_color_tones)
+        if len(tile_color_tones) > 7:
+            raise SystemExit(
+                f'[Error] {len(tile_color_tones)} palettes found. Limit is 7. Analyze the map first.')
         print(f'Unique colors: {len(tile_color_tones)}')
         return tile_color_tones, None, None, None
 
     if not palette:
-        tile_color_tones = process_partial_colors(tile_color_tones)
         print(f'Unique colors: {len(tile_color_tones)}')
 
         palette_name = identify_palette(tile_color_tones, palettes)
@@ -380,7 +396,6 @@ def get_attr_metatiles(metatiles, compressed_tiles, transformations, color_to_gr
                     retransformed_tile = reapply_transformations(
                         compressed_tiles[compressed_index], flip_x, flip_y, color_to_grays[i])
                     if tile.tobytes() == retransformed_tile.tobytes():
-                        compressed_index = compressed_index % 0x80
                         metatile_info.append(
                             (compressed_index, color, flip_x, flip_y))
                         break
@@ -484,26 +499,33 @@ def save_metatiles_bin_file(metatiles, tiles, output_path):
 
 
 def save_asm_file(colors, output_path):
+    # ? Leave only $7F for the space character and allow only 255 map tiles
+    # ? In that case, the tileset image must be changed accordingly
+    vram_area_tiles = 96
+    if len(colors) > 192:
+        vram_area_tiles = 128
+
     lines = []
 
     # Section 1
-    for i in range(12):
+    lines.append("; bottom-left vram area $00 - $7F")
+    for i in range(vram_area_tiles // 8):
         line_colors = colors[i * 8:(i + 1) * 8]
         if len(line_colors) < 8:
             line_colors.extend(['TEXT'] * (8 - len(line_colors)))
         line = "\ttilepal 0, " + ", ".join(line_colors)
         lines.append(line)
 
-    # Section 2
-    lines.append("")
-    lines.append("rept 16")
-    lines.append("    db $ff")
-    lines.append("endr")
-    lines.append("")
+    if len(colors) <= 192:
+        # Section 2
+        lines.append("rept 16")
+        lines.append("    db $ff")
+        lines.append("endr")
 
     # Section 3
-    for i in range(12):
-        line_colors = colors[(12 + i) * 8:(13 + i) * 8]
+    lines.append("\n; bottom-right vram area $80 - $FF")
+    for i in range(vram_area_tiles // 8):
+        line_colors = colors[(vram_area_tiles // 8 + i) * 8:(vram_area_tiles // 8 + 1 + i) * 8]
         if len(line_colors) < 8:
             line_colors.extend(['TEXT'] * (8 - len(line_colors)))
         line = "\ttilepal 1, " + ", ".join(line_colors)
@@ -538,7 +560,7 @@ def save_attr_metatiles_bin_file(attr_metatiles, output_path):
     with open(output_path, 'wb') as f:
         for metatile_info in attr_metatiles:
             for compressed_index, color, flip_x, flip_y in metatile_info:
-                f.write(bytes([compressed_index]))
+                f.write(bytes([compressed_index % 0x80]))
 
 
 def save_attributes_bin_file(attr_metatiles, palettes, output_path):
@@ -597,11 +619,12 @@ def main():
             base_dir, 'gfx', 'tilesets', f'{base_name}.pal')
         save_pal_file(pal_file_path, palette)
 
-    map_image = Image.open(map_path)
-    metatiles = divide_into_metatiles(map_image)
-    unique_metatiles, metatile_positions = identify_unique_metatiles(metatiles)
+    map_image = Image.open(map_path).convert("RGB")  # Remove transparency
+    metatiles, positions = divide_into_metatiles(map_image)
+    unique_metatiles, metatile_positions, metatile_indexes = identify_unique_metatiles(
+        metatiles, positions)
     tiles, tile_color_names, color_to_grays, monochrome = identify_unique_tiles(
-        unique_metatiles, palettes_8bit_rgb, palette)
+        unique_metatiles, metatile_positions, palettes_8bit_rgb, palette)
 
     if extract_palette:
         palette_colors = tiles
@@ -616,7 +639,7 @@ def main():
         blk_file_name = ''.join([word.capitalize()
                                 for word in base_name.split('_')]) + '.blk'
         blk_file_path = os.path.join(base_dir, 'maps', blk_file_name)
-        save_blk_file(blk_file_path, metatile_positions)
+        save_blk_file(blk_file_path, metatile_indexes)
 
         tileset_image_path = os.path.join(
             base_dir, 'gfx', 'tilesets', f'{base_name}.png')
@@ -656,7 +679,7 @@ def main():
         ablk_file_name = ''.join([word.capitalize()
                                   for word in base_name.split('_')]) + '.ablk'
         ablk_file_path = os.path.join(base_dir, 'maps', ablk_file_name)
-        save_blk_file(ablk_file_path, metatile_positions)
+        save_blk_file(ablk_file_path, metatile_indexes)
 
     print('Done!')
 
