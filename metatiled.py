@@ -1,6 +1,7 @@
 import os
+import colorsys
 import argparse
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageDraw
 
 
 # COLOR -----------------------------------------------------------------------
@@ -98,7 +99,7 @@ def palettes_to_8bit_rgb(palettes):
     return palettes_8bit
 
 
-def sort_palette(tones):
+def sort_color(tones):
     '''Sort using luminance formula'''
     return sorted(tones, key=lambda c: (
         0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]), reverse=True)
@@ -143,7 +144,7 @@ def tile_to_color(tile, color_to_grays):
 
 def get_tile_tones(tile):
     tile_tones = set(tile.getpixel((i % 8, i // 8)) for i in range(64))
-    tile_tones = sort_palette(tile_tones)
+    tile_tones = sort_color(tile_tones)
     return tile_tones
 
 
@@ -190,7 +191,7 @@ def get_roof_colors(unique_tiles, palette):
     roof_tones = []
     for tile in unique_tiles:
         tile_tones = set(tile.getpixel((i % 8, i // 8)) for i in range(64))
-        tile_tones = sort_palette(tile_tones)
+        tile_tones = sort_color(tile_tones)
         if is_roof(tile_tones, palette):
             roof_tones.append(tile_tones)
 
@@ -248,6 +249,97 @@ def load_custom_palette(image_path):
     return custom_palette
 
 
+# ANALYZE ---------------------------------------------------------------------
+
+
+def get_palette_color(tile, palette_colors):
+    '''Used when you don't know the name of the color'''
+    def fits_color(tile, color):
+        unique_tones = {tile.getpixel((x, y)) for x in range(8) for y in range(8)}
+        return len(unique_tones) <= 4 and all(tone in color for tone in unique_tones)
+
+    for index, color in enumerate(palette_colors):
+        if fits_color(tile, color):
+            return index, color
+    return None, None
+
+
+def generate_distinct_colors(n):
+    colors = []
+    for i in range(n):
+        hue = i / n
+        lightness = 0.5
+        saturation = 0.9
+        rgb = colorsys.hls_to_rgb(hue, lightness, saturation)
+        colors.append(tuple(int(c * 255) for c in rgb))
+    return colors
+
+
+def analyze(image_path):
+    image = Image.open(image_path)
+    width, height = image.size
+
+    if width % 32 != 0 or height % 32 != 0:
+        raise ValueError("Image dimensions must be multiples of 32")
+
+    tiles = []
+    for y in range(0, height, 8):
+        for x in range(0, width, 8):
+            tile = image.crop((x, y, x + 8, y + 8))
+            tiles.append((x, y, tile))
+
+    tile_color_tones = []
+    wrong_tiles = 0
+    for _, _, tile in tiles:
+        tile_tones = get_tile_tones(tile)
+        if len(tile_tones) <= 4:
+            tile_color_tones.append(tile_tones)
+        else:
+            wrong_tiles += 1
+    palette_colors = process_partial_colors(tile_color_tones)
+
+    print("Colors found:", len(palette_colors), "(> 7)" if len(palette_colors) > 7 else "")
+    print("Tiles with more than 4 tones:", wrong_tiles)
+    if len(palette_colors) <= 7 or wrong_tiles == 0:
+        print("The palette is valid!")
+        return
+    else:
+        print("The palette is invalid! The output image will help you fix the errors.")
+
+    mode = "fill"
+    output_image = Image.new("RGB", (width, height))
+    draw = ImageDraw.Draw(output_image)
+    display_colors = generate_distinct_colors(len(palette_colors))
+
+    for x, y, tile in tiles:
+        color_index, color = get_palette_color(tile, palette_colors)
+        if (color_index, color) != (None, None):
+            sorted_color = sort_color(color)
+            for i, tone in enumerate(sorted_color):
+                for dx in range(4):
+                    for dy in range(4):
+                        tile.putpixel((4*(i % 2) + dx, 4*(i//2) + dy), tone)
+            if len(sorted_color) < 4:
+                missing_index = len(sorted_color)
+                for dx in range(4):
+                    for dy in range(4):
+                        tile.putpixel((4*(missing_index % 2) + dx,
+                                       4*(missing_index//2) + dy), (0, 255, 0))
+        output_image.paste(tile, (x, y))
+        if (color_index, color) != (None, None):
+            if mode == "fill":
+                draw.rectangle([x, y, x + 8, y + 8],
+                               fill=display_colors[color_index])
+            else:
+                center_x = x + 3
+                center_y = y + 3
+                draw.rectangle([center_x, center_y, center_x + 1,
+                               center_y + 1], fill=display_colors[color_index])
+        draw.rectangle([x, y, x + 7, y + 7], outline=(0, 0, 0))
+
+    output_image.save(image_path.replace(".png", "_analysis.png"))
+
+
 # PROCESS ---------------------------------------------------------------------
 
 
@@ -298,19 +390,19 @@ def identify_unique_tiles(unique_metatiles, metatile_positions, palettes, palett
 
     print(f'Unique tiles: {len(unique_tiles)}', '(> 192)' if len(unique_tiles) > 192 else '')
 
-    tile_color_tones = process_partial_colors(tile_color_tones)
+    palette_colors = process_partial_colors(tile_color_tones)
 
     if palette == 'extract':
-        if len(tile_color_tones) > 7:
+        if len(palette_colors) > 7:
             raise SystemExit(
-                f'[Error] {len(tile_color_tones)} palettes found. Limit is 7. Analyze the map first.')
-        print(f'Unique colors: {len(tile_color_tones)}')
-        return tile_color_tones, None, None, None
+                f'[Error] {len(palette_colors)} colors found. Limit is 7. Analyze the map first.')
+        print(f'Unique colors: {len(palette_colors)}')
+        return palette_colors, None, None, None
 
     if not palette:
-        print(f'Unique colors: {len(tile_color_tones)}')
+        print(f'Unique colors: {len(palette_colors)}')
 
-        palette_name = identify_palette(tile_color_tones, palettes)
+        palette_name = identify_palette(palette_colors, palettes)
         if palette_name == 'monochrome':
             monocrhome = True
             palette_name = 'morn'
@@ -371,6 +463,8 @@ def compress_tiles(tiles, tile_color_names, color_to_grays):
             compressed_tiles.append(gray_tile)
             transformations.append(
                 (len(compressed_tiles) - 1, False, False, color))
+
+    print(f'Compressed tiles: {len(tiles)} to {len(compressed_tiles)} ({len(tiles) - len(compressed_tiles)})')
 
     return compressed_tiles, transformations
 
@@ -594,6 +688,8 @@ def main():
                         help='Apply additional compression to tiles.')
     parser.add_argument('--extract-palette', '-e', action='store_true',
                         help='Extract the palette from the image.')
+    parser.add_argument('--analyze-palette', '-a', action='store_true',
+                        help='Validate the palette; if invalid, output a guiding image.')
 
     args = parser.parse_args()
 
@@ -601,9 +697,15 @@ def main():
     palette_name = args.palette
     compress = args.compress
     extract_palette = args.extract_palette
+    analyze_palette = args.analyze_palette
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
     base_name = os.path.splitext(os.path.basename(map_path))[0]
+
+    if analyze_palette:
+        analyze(map_path)
+        return
+
     ensure_directories(base_dir)
 
     palette = palettes_8bit_rgb[palette_name] if palette_name else None
