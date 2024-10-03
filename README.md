@@ -59,6 +59,15 @@ I see this as a complementary tool for [Polished Map](https://github.com/Rangi42
 <img src="https://raw.githubusercontent.com/j4n7/metatiled/refs/heads/master/examples/tilesets/new_bark_town_ablk.png?raw=true" alt="New Bark Town Compressed Tileset">
 </p>
 
+<br>
+
+<p align="center"><b>Palette analysis:</b></p>
+<p align="center">
+<img src="https://raw.githubusercontent.com/j4n7/metatiled/refs/heads/master/examples/maps/wrong_palette_analysis.png?raw=true" alt="New Bark Town Map" width="320" height="288">
+</p>
+<p align="center">All tiles using the same palette are shown in a randomly assigned color.</p>
+<p align="center">Tiles with more than 4 tones (colors) are displayed in their original form.</p>
+
 ## Why?
 
 So far, there is no program that allows generating the necessary files to create a compatible map with the mentioned ROMs almost from scratch. 
@@ -88,6 +97,17 @@ or
 python3 metatiled.py <map_image> [-e]
 ```
 
+<br>
+
+To check if palette is valid and, if not, output a guiding image:
+```sh
+python3 metatiled.py <map_image> [--analyze-palette]
+```
+or
+```sh
+python3 metatiled.py <map_image> [-a]
+```
+
 ### Positional Arguments
 
 - `<map_image>`: Name of the map image file in PNG format.
@@ -97,6 +117,7 @@ python3 metatiled.py <map_image> [-e]
 - `--palette`, `-p`: Name of the palette to use that corresponds to the image. This argument is optional.
 - `--compress`, `-c`: Apply additional compression to the tiles. This argument is optional.
 - `--extract-palette`, `-e`: Generate a txt file with the palette of the map. This argument is optional.
+- `--analyze-palette`, `-a`: Validates the palette and outputs a guiding image if it’s invalid. This argument is optional.
 
 ## Notes
 
@@ -108,6 +129,7 @@ python3 metatiled.py <map_image> [-e]
 - The `--palette` option is not required and must specify one of the available palettes. You have to make sure your image is using the that palette. All colors must be contained in that palette, except the 4 ones that are used for the roofs. 
 - The `--compress` option is not required and, if used, will apply additional compression to the tiles.
 - The `--extract-palette` option is not required and is meant to be used alone. It will generate a txt file with the palette of the map. That file will still require some manual adjustments.
+- The `--analyze-palette` option is not required and is meant to be used alone. It will output an image if the palette is invalid, meaning it contains more than 7 colors or some tiles have more than 5 tones. The image helps identify problematic tiles, allowing you to manually correct the map.
 
 ## Examples
 
