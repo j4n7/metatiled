@@ -222,31 +222,53 @@ def get_tile_palette_color(tile_tones, palette):
     return color_name, matching_positions[color_name]
 
 
-def load_custom_palette(image_path):
+def load_info(image_path):
     txt_path = image_path.replace('.png', '.txt')
     if not os.path.exists(txt_path):
         return None
 
-    print('Custom palette found!')
-
-    custom_palette = {}
     with open(txt_path, 'r') as f:
         lines = f.read().strip().split('\n')
-        i = 0
-        while i < len(lines):
-            color_name = lines[i].strip()
-            if color_name:
-                tones = []
-                for j in range(1, 5):
-                    if i + j < len(lines):
-                        tone = lines[i + j].strip()
-                        if tone:
-                            tones.append(hex_to_rgb(tone))
-                        else:
-                            tones.append((0, 0, 0))
-                custom_palette[color_name] = tones
-            i += 6  # Next color (name + 4 tones + blank line)
-    return custom_palette
+
+    custom_palette = {}
+    collision_colors = {}
+    in_palette_section = False
+    in_collision_section = False
+    current_color_name = None
+
+    for line in lines:
+        line = line.strip()
+        if line == '[PALETTE]':
+            in_palette_section = True
+            in_collision_section = False
+            print('Custom palette found!')
+            continue
+        elif line == '[COLLISIONS]':
+            in_palette_section = False
+            in_collision_section = True
+            if os.path.exists(image_path.replace('.png', '_coll.png')):
+                print('Collision info and mask found!')
+            continue
+
+        if in_palette_section:
+            if line and not line.startswith('['):
+                if len(line) == 6 and all(c in '0123456789ABCDEFabcdef' for c in line):
+                    if current_color_name:
+                        custom_palette[current_color_name].append(
+                            hex_to_rgb(line))
+                else:
+                    current_color_name = line
+                    custom_palette[current_color_name] = []
+
+        if in_collision_section:
+            if line and not line.startswith('['):
+                parts = line.split(',')
+                if len(parts) == 2:
+                    collision_name = parts[0].strip()
+                    collision_color = f'#{parts[1].strip()}'
+                    collision_colors[collision_color] = collision_name
+
+    return custom_palette, collision_colors
 
 
 # ANALYZE ---------------------------------------------------------------------
@@ -255,7 +277,8 @@ def load_custom_palette(image_path):
 def get_palette_color(tile, palette_colors):
     '''Used when you don't know the name of the color'''
     def fits_color(tile, color):
-        unique_tones = {tile.getpixel((x, y)) for x in range(8) for y in range(8)}
+        unique_tones = {tile.getpixel((x, y))
+                        for x in range(8) for y in range(8)}
         return len(unique_tones) <= 4 and all(tone in color for tone in unique_tones)
 
     for index, color in enumerate(palette_colors):
@@ -298,7 +321,8 @@ def analyze(image_path):
             wrong_tiles += 1
     palette_colors = process_partial_colors(tile_color_tones)
 
-    print("Colors found:", len(palette_colors), "(> 7)" if len(palette_colors) > 7 else "")
+    print("Colors found:", len(palette_colors),
+          "(> 7)" if len(palette_colors) > 7 else "")
     print("Tiles with more than 4 tones:", wrong_tiles)
     if len(palette_colors) <= 7 or wrong_tiles == 0:
         print("The palette is valid!")
@@ -388,7 +412,8 @@ def identify_unique_tiles(unique_metatiles, metatile_positions, palettes, palett
                     if tile_tones not in tile_color_tones:
                         tile_color_tones.append(tile_tones)
 
-    print(f'Unique tiles: {len(unique_tiles)}', '(> 192)' if len(unique_tiles) > 192 else '')
+    print(f'Unique tiles: {len(unique_tiles)}',
+          '(> 192)' if len(unique_tiles) > 192 else '')
 
     palette_colors = process_partial_colors(tile_color_tones)
 
@@ -464,7 +489,8 @@ def compress_tiles(tiles, tile_color_names, color_to_grays):
             transformations.append(
                 (len(compressed_tiles) - 1, False, False, color))
 
-    print(f'Compressed tiles: {len(tiles)} to {len(compressed_tiles)} ({len(tiles) - len(compressed_tiles)})')
+    print(
+        f'Compressed tiles: {len(tiles)} to {len(compressed_tiles)} ({len(tiles) - len(compressed_tiles)})')
 
     return compressed_tiles, transformations
 
@@ -535,6 +561,7 @@ def save_blk_file(output_path, metatile_positions):
 
 def save_palette_txt_file(image_path, palette):
     with open(f"{image_path[:-4]}.txt", "w") as file:
+        file.write("[PALETTE]\n\n")
         for i, color_tones in enumerate(palette):
             file.write("?\n")
             for tone in color_tones:
@@ -555,6 +582,40 @@ def save_pal_file(pal_path, custom_palette):
             for tone in tones:
                 r, g, b = convert_to_5bit_rgb(tone)
                 file.write(f"\tRGB {r:02}, {g:02}, {b:02}\n")
+
+
+def save_collision_asm_file(collision_mask, collision_colors, metatile_positions, output_path):
+    metatile_collisions = []
+
+    for i, (pos_x, pos_y) in enumerate(metatile_positions):
+
+        real_x = (pos_x - 1) * 32
+        real_y = (pos_y - 1) * 32
+        collision_metatile = collision_mask.crop(
+            (real_x, real_y, real_x + 32, real_y + 32))
+
+        collisions = []
+        for tile_y in range(0, 32, 16):
+            for tile_x in range(0, 32, 16):
+                color = collision_metatile.getpixel((tile_x, tile_y))
+                if color:
+                    hex_color = '#{:02x}{:02x}{:02x}'.format(*color)
+                    collision_type = collision_colors.get(hex_color, '?')
+                    collisions.append(collision_type)
+
+                    # metatiles[i].save(os.path.join('debug', f'metatile_{i}.png'))
+                    # collision_metatile.save(os.path.join('debug', f'collision_metatile_{i}.png'))
+
+        metatile_collisions.append(collisions)
+
+    lines = []
+    for i, collisions in enumerate(metatile_collisions):
+        line = f"\ttilecoll {', '.join(collisions)} ; {i:02x}"
+        lines.append(line)
+
+    with open(output_path, 'w') as f:
+        for line in lines:
+            f.write(line + '\n')
 
 
 # blk -------------------------------------------------------------------------
@@ -619,7 +680,8 @@ def save_asm_file(colors, output_path):
     # Section 3
     lines.append("\n; bottom-right vram area $80 - $FF")
     for i in range(vram_area_tiles // 8):
-        line_colors = colors[(vram_area_tiles // 8 + i) * 8:(vram_area_tiles // 8 + 1 + i) * 8]
+        line_colors = colors[(vram_area_tiles // 8 + i)
+                             * 8:(vram_area_tiles // 8 + 1 + i) * 8]
         if len(line_colors) < 8:
             line_colors.extend(['TEXT'] * (8 - len(line_colors)))
         line = "\ttilepal 1, " + ", ".join(line_colors)
@@ -711,7 +773,10 @@ def main():
     palette = palettes_8bit_rgb[palette_name] if palette_name else None
     palette = 'extract' if extract_palette else palette
 
-    custom_palette = load_custom_palette(map_path) if not palette else None
+    info = load_info(map_path)
+
+    custom_palette = info[0] if not palette else None
+    collision_colors = info[1]
 
     if custom_palette:
         palettes_8bit_rgb['custom'] = custom_palette
@@ -734,6 +799,14 @@ def main():
 
         print('Done!')
         return
+
+    if collision_colors:
+        collision_mask = Image.open(map_path.replace(
+            '.png', '_collision.png')).convert('RGB')
+        collision_asm_path = os.path.join(
+            base_dir, 'data', 'tilesets', f'{base_name}_collision.asm')
+        save_collision_asm_file(
+            collision_mask, collision_colors, metatile_positions, collision_asm_path)
 
     if not compress:
         ensure_file(base_dir, 'Makefile')

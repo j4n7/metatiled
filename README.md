@@ -63,7 +63,7 @@ I see this as a complementary tool for [Polished Map](https://github.com/Rangi42
 
 <p align="center"><b>Palette analysis:</b></p>
 <p align="center">
-<img src="https://raw.githubusercontent.com/j4n7/metatiled/refs/heads/master/examples/maps/wrong_palette_analysis.png?raw=true" alt="New Bark Town Map" width="320" height="288">
+<img src="https://raw.githubusercontent.com/j4n7/metatiled/refs/heads/master/examples/maps/office_analysis.png?raw=true" alt="Image generated from the palette analysis" width="320" height="288">
 </p>
 <p align="center">All tiles using the same palette are shown in a randomly assigned color.</p>
 <p align="center">Tiles with more than 4 tones (colors) are displayed in their original form.</p>
@@ -193,7 +193,7 @@ Each palette contains different color tones used to convert the map image.
 
 ## TODO
 
-- Collision and priority masks
+- Priority masks
 - Graphical interface
 - Auto-import references directly into the ROM project
 - Implement validation mechanisms
