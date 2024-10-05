@@ -442,6 +442,13 @@ def identify_unique_tiles(unique_metatiles, metatile_positions, palettes, palett
         color_to_grays.append(positions)
         # print(color, positions)
 
+    # ? Tile $7F (128) is reserved for the space character
+    if len(unique_tiles) > 192:
+        space_tile = Image.new('RGB', (8, 8), color=(0, 255, 255))
+        unique_tiles.insert(127, space_tile)
+        tile_color_names.insert(127, 'TEXT')
+        color_to_grays.insert(127, {(0, 255, 255): 0})
+
     return unique_tiles, tile_color_names, color_to_grays, monocrhome
 
 
@@ -450,44 +457,56 @@ def compress_tiles(tiles, tile_color_names, color_to_grays):
     transformations = []
 
     for i, tile in enumerate(tiles):
-        gray_tile = tile_to_grayscale(tile, color_to_grays[i])
-        color = tile_color_names[i]
-        variants = {
-            'original': gray_tile,
-            'flip_x': ImageOps.mirror(gray_tile),
-            'flip_y': ImageOps.flip(gray_tile),
-            'flip_xy': ImageOps.flip(ImageOps.mirror(gray_tile))
-        }
+        # ? Tile $7F (128) is reserved for the space character
+        if len(tiles) <= 192 or (len(tiles) > 192 and i != 127):
+            gray_tile = tile_to_grayscale(tile, color_to_grays[i])
+            color = tile_color_names[i]
+            variants = {
+                'original': gray_tile,
+                'flip_x': ImageOps.mirror(gray_tile),
+                'flip_y': ImageOps.flip(gray_tile),
+                'flip_xy': ImageOps.flip(ImageOps.mirror(gray_tile))
+            }
 
-        found = False
-        for variant_name, variant_tile in variants.items():
-            for j, comp_tile in enumerate(compressed_tiles):
-                if variant_tile.tobytes() == comp_tile.tobytes():
-                    flip_x = 'flip_x' in variant_name or 'flip_xy' in variant_name
-                    flip_y = 'flip_y' in variant_name or 'flip_xy' in variant_name
-                    transformations.append((j, flip_x, flip_y, color))
+            found = False
+            for variant_name, variant_tile in variants.items():
+                for j, comp_tile in enumerate(compressed_tiles):
+                    if variant_tile.tobytes() == comp_tile.tobytes():
+                        flip_x = 'flip_x' in variant_name or 'flip_xy' in variant_name
+                        flip_y = 'flip_y' in variant_name or 'flip_xy' in variant_name
+                        transformations.append((j, flip_x, flip_y, color))
 
-                    # Reapply transformations to original tile
-                    retransformed_tile = reapply_transformations(
-                        comp_tile, flip_x, flip_y, color_to_grays[i])
+                        # Reapply transformations to original tile
+                        retransformed_tile = reapply_transformations(
+                            comp_tile, flip_x, flip_y, color_to_grays[i])
 
-                    # Debugging
-                    # tile.save(f"debug/{i}_original_tile.png")
-                    # gray_tile.save(f"debug/{i}_gray_tile.png")
-                    # retransformed_tile.save(f"debug/{i}_retransformed_tile_{variant_name}.png")
+                        # Debugging
+                        # tile.save(f"debug/{i}_original_tile.png")
+                        # gray_tile.save(f"debug/{i}_gray_tile.png")
+                        # retransformed_tile.save(f"debug/{i}_retransformed_tile_{variant_name}.png")
 
-                    assert retransformed_tile.tobytes() == tile.tobytes(), \
-                        f"Transformation error: tile {i}, variant {variant_name}, flip_x={flip_x}, flip_y={flip_y}, color={color}"
+                        assert retransformed_tile.tobytes() == tile.tobytes(), \
+                            f"Transformation error: tile {i}, variant {variant_name}, flip_x={flip_x}, flip_y={flip_y}, color={color}"
 
-                    found = True
+                        found = True
+                        break
+                if found:
                     break
-            if found:
-                break
 
-        if not found:
-            compressed_tiles.append(gray_tile)
-            transformations.append(
-                (len(compressed_tiles) - 1, False, False, color))
+            if not found:
+                compressed_tiles.append(gray_tile)
+                transformations.append(
+                    (len(compressed_tiles) - 1, False, False, color))
+
+    # ? It seems Polished crystal always uses tile $7F for the space character
+    if len(compressed_tiles) > 127:
+        space_tile = Image.new('RGB', (8, 8), color=(0, 255, 255))
+        compressed_tiles.insert(127, space_tile)
+
+        # Adjust indices in transformations
+        for idx, (j, flip_x, flip_y, color) in enumerate(transformations):
+            if j >= 127:
+                transformations[idx] = (j + 1, flip_x, flip_y, color)
 
     print(
         f'Compressed tiles: {len(tiles)} to {len(compressed_tiles)} ({len(tiles) - len(compressed_tiles)})')
@@ -505,6 +524,9 @@ def reapply_transformations(tile, flip_x, flip_y, color_to_grays):
 
 
 def get_attr_metatiles(metatiles, compressed_tiles, transformations, color_to_grays):
+    if len(color_to_grays) > 192:
+        del color_to_grays[127]
+
     attr_metatiles = []
 
     for metatile in metatiles:
@@ -553,9 +575,9 @@ def ensure_directories(base_dir):
 # SAVE ------------------------------------------------------------------------
 
 
-def save_blk_file(output_path, metatile_positions):
+def save_blk_file(output_path, metatile_indexes):
     with open(output_path, 'wb') as f:
-        for position in metatile_positions:
+        for position in metatile_indexes:
             f.write(position.to_bytes(1, 'big'))
 
 
@@ -629,7 +651,8 @@ def save_tileset_image(tiles, color_to_grays, output_path, grayscale=True):
 
     if grayscale:
         for i, tile in enumerate(tiles):
-            new_tile = tile_to_grayscale(tile, color_to_grays[i])
+            new_tile = tile if len(tiles) > 192 and i == 127 else tile_to_grayscale(
+                tile, color_to_grays[i])
             x = (i % 16) * 8
             y = (i // 16) * 8
             tileset_image.paste(new_tile, (x, y))
@@ -650,12 +673,15 @@ def save_metatiles_bin_file(metatiles, tiles, output_path):
                 for x in range(0, 32, 8):
                     tile = metatile.crop((x, y, x + 8, y + 8))
                     tile_index = tiles.index(tile)
+
+                    # ? The space tile can't be used in any metatiles
+                    if len(tiles) > 192 and tile_index == 127:
+                        tile_index = tiles.index(tile, 128)
+
                     f.write(tile_index.to_bytes(1, 'big'))
 
 
-def save_asm_file(colors, output_path):
-    # ? Leave only $7F for the space character and allow only 255 map tiles
-    # ? In that case, the tileset image must be changed accordingly
+def save_palette_map_asm_file(colors, output_path):
     vram_area_tiles = 96
     if len(colors) > 192:
         vram_area_tiles = 128
@@ -775,8 +801,8 @@ def main():
 
     info = load_info(map_path)
 
-    custom_palette = info[0] if not palette else None
-    collision_colors = info[1]
+    custom_palette = info[0] if info and not palette else None
+    collision_colors = info[1] if info else None
 
     if custom_palette:
         palettes_8bit_rgb['custom'] = custom_palette
@@ -828,7 +854,7 @@ def main():
         if not monochrome:
             asm_file_path = os.path.join(
                 base_dir, 'gfx', 'tilesets', f'{base_name}_palette_map.asm')
-            save_asm_file(tile_color_names, asm_file_path)
+            save_palette_map_asm_file(tile_color_names, asm_file_path)
     else:
         compressed_tiles, transformations = compress_tiles(
             tiles, tile_color_names, color_to_grays)
