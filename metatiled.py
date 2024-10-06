@@ -81,7 +81,7 @@ def convert_to_8bit_rgb(color):
 
 
 def rgb_to_hex(rgb):
-    return ''.join(f'{value:02X}' for value in rgb[:-1])
+    return ''.join(f'{value:02X}' for value in rgb)
 
 
 def hex_to_rgb(hex_color):
@@ -181,6 +181,9 @@ def identify_palette(tile_color_tones, palettes):
 
 def get_roof_colors(unique_tiles, palette):
     '''For monochrome maps and roof tiles.'''
+
+    if not palette.get('ROOF'):
+        return
 
     def is_roof(tile_tones, palette):
         for color_name, palette_tones in palette.items():
