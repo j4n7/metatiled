@@ -379,10 +379,15 @@ def divide_into_metatiles(image):
     return metatiles, positions
 
 
-def identify_unique_metatiles(metatiles, positions):
+def identify_unique_metatiles(metatiles, positions, darkest_tone):
     unique_metatiles = []
     metatile_positions = []
     metatile_indexes = []
+
+    border_metatile = Image.new('RGB', (32, 32), color=darkest_tone)
+    unique_metatiles.append(border_metatile)
+    metatile_positions.append((0, 0))
+
     for i, metatile in enumerate(metatiles):
         if metatile not in unique_metatiles:
             unique_metatiles.append(metatile)
@@ -622,7 +627,7 @@ def save_collision_asm_file(collision_mask, collision_colors, metatile_positions
                 color = collision_metatile.getpixel((tile_x, tile_y))
                 if color:
                     hex_color = '#{:02x}{:02x}{:02x}'.format(*color)
-                    collision_type = collision_colors.get(hex_color, '?')
+                    collision_type = collision_colors.get(hex_color, '?') if i != 0 else 'VOID'
                     collisions.append(collision_type)
 
                     # metatiles[i].save(os.path.join('debug', f'metatile_{i}.png'))
@@ -813,9 +818,10 @@ def main():
         save_pal_file(pal_file_path, palette)
 
     map_image = Image.open(map_path).convert("RGB")  # Remove transparency
+    darkest_tone = sort_color(list(set(map_image.getdata())))[-1]
     metatiles, positions = divide_into_metatiles(map_image)
     unique_metatiles, metatile_positions, metatile_indexes = identify_unique_metatiles(
-        metatiles, positions)
+        metatiles, positions, darkest_tone)
     tiles, tile_color_names, color_to_grays, monochrome = identify_unique_tiles(
         unique_metatiles, metatile_positions, palettes_8bit_rgb, palette)
 
