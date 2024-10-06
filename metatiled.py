@@ -602,16 +602,26 @@ def save_palette_txt_file(image_path, palette):
                 file.write("\n")
 
 
-def save_pal_file(pal_path, custom_palette):
+def save_pal_file(pal_path, custom_palette, compress):
     color_order = palettes['morn'].keys()
-
     with open(pal_path, 'w') as file:
-        for color_name in color_order:
-            file.write(f"; {color_name.lower()}\n")
-            tones = custom_palette.get(color_name, [(0, 0, 0)] * 4)
-            for tone in tones:
-                r, g, b = convert_to_5bit_rgb(tone)
-                file.write(f"\tRGB {r:02}, {g:02}, {b:02}\n")
+        if compress:
+            file.write("\n")
+            for color_name in color_order:
+                tones = custom_palette.get(color_name, [(0, 0, 0)] * 4)
+                rgb_values = []
+                for tone in tones:
+                    r, g, b = convert_to_5bit_rgb(tone)
+                    rgb_values.append(f"{r:02},{g:02},{b:02}")
+                rgb_values_str = ', '.join(rgb_values)
+                file.write(f"\tRGB {rgb_values_str} ; {color_name.lower()}\n")
+        else:
+            for color_name in color_order:
+                file.write(f"; {color_name.lower()}\n")
+                tones = custom_palette.get(color_name, [(0, 0, 0)] * 4)
+                for tone in tones:
+                    r, g, b = convert_to_5bit_rgb(tone)
+                    file.write(f"\tRGB {r:02}, {g:02}, {b:02}\n")
 
 
 def save_collision_asm_file(collision_mask, collision_colors, metatile_positions, output_path):
@@ -818,7 +828,7 @@ def main():
 
         pal_file_path = os.path.join(
             base_dir, 'gfx', 'tilesets', f'{base_name}.pal')
-        save_pal_file(pal_file_path, palette)
+        save_pal_file(pal_file_path, palette, compress)
 
     map_image = Image.open(map_path).convert("RGB")  # Remove transparency
     darkest_tone = sort_color(list(set(map_image.getdata())))[-1]
