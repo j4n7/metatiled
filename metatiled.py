@@ -329,7 +329,6 @@ def analyze(image_path):
     print("Tiles with more than 4 tones:", wrong_tiles)
     if len(palette_colors) <= 7 and wrong_tiles == 0:
         print("The palette is valid!")
-        return
     else:
         print("The palette is invalid! The output image will help you fix the errors.")
 
