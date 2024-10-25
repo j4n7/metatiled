@@ -1,4 +1,5 @@
 import os
+import shutil
 import colorsys
 import argparse
 from PIL import Image, ImageOps, ImageDraw
@@ -103,6 +104,14 @@ def sort_color(tones):
     '''Sort using luminance formula'''
     return sorted(tones, key=lambda c: (
         0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]), reverse=True)
+
+
+def is_tile_white(tile):
+    white_pixel = (255, 255, 255)
+    for pixel in tile.getdata():
+        if pixel != white_pixel:
+            return False
+    return True
 
 
 def tile_to_grayscale(tile, color_to_grays):
@@ -553,6 +562,211 @@ def get_attr_metatiles(metatiles, compressed_tiles, transformations, color_to_gr
     return attr_metatiles
 
 
+# MERGE -----------------------------------------------------------------------
+
+
+def read_bin_file(file_path):
+    with open(file_path, 'rb') as f:
+        content = f.read()
+        return [list(content[i:i+16]) for i in range(0, len(content), 16)]
+
+
+def process_tileset(image_path):
+    tileset_image = Image.open(image_path).convert("RGB")
+    width, height = tileset_image.size
+
+    tiles = []
+
+    for y in range(0, height, 8):
+        for x in range(0, width, 8):
+            tile = tileset_image.crop((x, y, x + 8, y + 8))
+
+            if is_tile_white(tile):
+                # Check if last tile is white
+                if x + 8 >= width and y + 8 >= height:
+                    # ! Fringe case: last tile is really white
+                    break
+
+                # Check if next tile is white
+                next_x = x + 8
+                next_y = y
+                if next_x >= width:
+                    next_x = 0
+                    next_y = y + 8
+
+                if next_y < height:
+                    next_tile = tileset_image.crop(
+                        (next_x, next_y, next_x + 8, next_y + 8))
+                    if is_tile_white(next_tile):
+                        break
+
+            tiles.append(tile)
+
+    return tiles
+
+
+def merge_tilesets(gfx_dir):
+    tilesets = []
+    palette_maps = []
+    found_pal_file = False
+    for filename in os.listdir(gfx_dir):
+        if filename.endswith('.png'):
+            tileset_path = os.path.join(gfx_dir, filename)
+            tiles = process_tileset(tileset_path)
+            tilesets.append(tiles)
+        elif filename.endswith('.asm'):
+            palette_map_path = os.path.join(gfx_dir, filename)
+            palette_map = []
+            with open(palette_map_path, 'r') as f:
+                lines = f.read().strip().split('\n')
+                for line in lines:
+                    if line.startswith('\ttilepal'):
+                        colors = line.split(', ')[1:]
+                        palette_map.extend(colors)
+            palette_maps.append(palette_map)
+        elif filename.endswith('.pal') and not found_pal_file:
+            pal_file_path = os.path.join(gfx_dir, filename)
+            shutil.copy(pal_file_path, os.path.join(gfx_dir, 'merged.pal'))
+            found_pal_file = True
+
+    base_tileset = max(tilesets, key=len)
+    base_tileset_index = tilesets.index(base_tileset)
+    base_palette_map = palette_maps[base_tileset_index]
+
+    tiles_index_mappings = [{} for _ in range(len(tilesets))]
+
+    for i, tileset in enumerate(tilesets):
+        if i == base_tileset_index:
+            continue
+
+        for tile_index, tile in enumerate(tileset):
+            for base_tile_index, base_tile in enumerate(base_tileset):
+                if tile.tobytes() == base_tile.tobytes():
+                    if palette_maps[i][tile_index] == base_palette_map[base_tile_index]:
+                        tiles_index_mappings[i][tile_index] = base_tile_index
+
+                        # debug_dir = os.path.join(gfx_dir, 'debug')
+                        # os.makedirs(debug_dir, exist_ok=True)
+                        # debug_image = Image.new('RGB', (8, 16))
+                        # debug_image.paste(tile, (0, 0))
+                        # debug_image.paste(base_tile, (0, 8))
+                        # debug_image_path = os.path.join(debug_dir, f'match_{i}_{tile_index}_{base_tile_index}.png')
+                        # debug_image.save(debug_image_path)
+
+                        break
+
+    tile_width, tile_height = base_tileset[0].size
+    merged_tiles = base_tileset[:]
+    merged_palette_map = base_palette_map[:len(base_tileset)]
+    for i, tileset in enumerate(tilesets):
+        if i == base_tileset_index:
+            continue
+        for tile_index, tile in enumerate(tileset):
+            if tile_index not in tiles_index_mappings[i]:
+                tiles_index_mappings[i][tile_index] = len(merged_tiles)
+                merged_tiles.append(tile)
+                merged_palette_map.append(palette_maps[i][tile_index])
+
+    merged_width = tile_width * 16
+    merged_height = tile_height * ((len(merged_tiles) + 15) // 16)
+    merged_image = Image.new(
+        'RGB', (merged_width, merged_height), (255, 255, 255))
+
+    for idx, tile in enumerate(merged_tiles):
+        x = (idx % 16) * tile_width
+        y = (idx // 16) * tile_height
+        merged_image.paste(tile, (x, y))
+
+    merged_image_path = os.path.join(gfx_dir, 'merged.png')
+    merged_image.save(merged_image_path)
+
+    save_palette_map_asm_file(merged_palette_map, os.path.join(
+        gfx_dir, 'merged_palette_map.asm'))
+
+    tiles_index_mappings = [mapping for i, mapping in enumerate(
+        tiles_index_mappings) if i != base_tileset_index]
+
+    return base_tileset_index, tiles_index_mappings
+
+
+def merge_metatiles(data_dir, base_tileset_index, tiles_index_mappings):
+    bin_files = [f for f in os.listdir(data_dir) if f.endswith('.bin')]
+    base_metatiles_file = os.path.join(data_dir, bin_files[base_tileset_index])
+
+    base_metatiles = read_bin_file(base_metatiles_file)
+    base_metatiles_count = len(base_metatiles)
+
+    metatiles_index_mappings = []
+
+    for filename in bin_files:
+        if filename != os.path.basename(base_metatiles_file):
+            file_path = os.path.join(data_dir, filename)
+            metatiles = read_bin_file(file_path)
+
+            file_index_mapping = {}
+            for metatile_index, metatile in enumerate(metatiles):
+                for i in range(16):
+                    tile_index = metatile[i]
+                    for mapping in tiles_index_mappings:
+                        if tile_index in mapping:
+                            metatile[i] = mapping[tile_index]
+                            break
+                match_found = False
+                for base_metatile_index, base_metatile in enumerate(base_metatiles[:base_metatiles_count]):
+                    if metatile == base_metatile:
+                        file_index_mapping[metatile_index] = base_metatile_index
+                        match_found = True
+                        break
+                if not match_found:
+                    file_index_mapping[metatile_index] = len(base_metatiles)
+                    base_metatiles.append(metatile)
+
+            if file_index_mapping:
+                metatiles_index_mappings.append(file_index_mapping)
+
+    output_file_path = os.path.join(data_dir, 'merged_metatiles.bin')
+    with open(output_file_path, 'wb') as f:
+        for metatile in base_metatiles:
+            f.write(bytes(metatile))
+
+    return metatiles_index_mappings
+
+
+def merge_blks(map_dir, base_tileset_index, metatiles_index_mappings):
+    blk_files = os.listdir(map_dir)
+    base_blk_file = os.path.join(map_dir, blk_files[base_tileset_index])
+
+    base_map = read_bin_file(base_blk_file)
+    base_map_count = len(base_map)
+
+    for blk_file in blk_files:
+        if blk_file != os.path.basename(base_blk_file):
+            file_path = os.path.join(map_dir, blk_file)
+            map = read_bin_file(file_path)
+
+            new_map = []
+            for line in map:
+                line_length = len(line)
+                for i in range(line_length):
+                    mapped = False
+                    for mapping in metatiles_index_mappings:
+                        if line[i] in mapping:
+                            line[i] = mapping[line[i]]
+                            mapped = True
+                            break
+                    if not mapped:
+                        new_metatile_index = base_map_count + len(base_map)
+                        line[i] = new_metatile_index
+
+                new_map.append(line)
+
+            output_file_path = os.path.join(
+                map_dir, f"{os.path.splitext(blk_file)[0]}Merged.blk")
+            with open(output_file_path, 'wb') as f:
+                for metatile in new_map:
+                    f.write(bytes(metatile))
+
+
 # FILES -----------------------------------------------------------------------
 
 
@@ -567,16 +781,19 @@ def ensure_file(base_dir, file_name):
                 "# Polished Map++ assumes a directory with a Main.asm is the main project directory.\n")
 
 
-def ensure_directories(base_dir):
+def process_directories(base_dir, create=False):
     directories = [
         "data/tilesets",
         "gfx/tilesets",
         "maps"
     ]
+    dir_paths = []
     for directory in directories:
         path = os.path.join(base_dir, directory)
-        if not os.path.exists(path):
+        if create and not os.path.exists(path):
             os.makedirs(path)
+        dir_paths.append(path)
+    return dir_paths
 
 
 # SAVE ------------------------------------------------------------------------
@@ -639,7 +856,8 @@ def save_collision_asm_file(collision_mask, collision_colors, metatile_positions
                 color = collision_metatile.getpixel((tile_x, tile_y))
                 if color:
                     hex_color = '#{:02x}{:02x}{:02x}'.format(*color)
-                    collision_type = collision_colors.get(hex_color, '?') if i != 0 else 'VOID'
+                    collision_type = collision_colors.get(
+                        hex_color, '?') if i != 0 else 'VOID'
                     collisions.append(collision_type)
 
                     # metatiles[i].save(os.path.join('debug', f'metatile_{i}.png'))
@@ -785,8 +1003,12 @@ def main():
 
     parser = argparse.ArgumentParser(
         description='Convert an image (PNG) to a map.')
-    parser.add_argument('map_image', type=str,
-                        help='Name of the map image file (PNG).')
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument('map_image', type=str, nargs='?', default=None,
+                       help='Name of the map image file (PNG).')
+    group.add_argument('--merge', '-m', action='store_true',
+                       help='Merge tilesets along with their related files.')
+
     parser.add_argument('--palette', '-p', type=str,
                         help='Specify palette to use (avoid auto-detect).')
     parser.add_argument('--compress', '-c', action='store_true',
@@ -800,18 +1022,28 @@ def main():
 
     map_path = args.map_image
     palette_name = args.palette
+    merge = args.merge
     compress = args.compress
     extract_palette = args.extract_palette
     analyze_palette = args.analyze_palette
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
+
+    if merge:
+        data_dir, gfx_dir, map_dir = process_directories(base_dir)
+        base_tileset_index, tiles_index_mappings = merge_tilesets(gfx_dir)
+        metatiles_index_mappings = merge_metatiles(
+            data_dir, base_tileset_index, tiles_index_mappings)
+        merge_blks(map_dir, base_tileset_index, metatiles_index_mappings)
+        return
+
     base_name = os.path.splitext(os.path.basename(map_path))[0]
 
     if analyze_palette:
         analyze(map_path)
         return
 
-    ensure_directories(base_dir)
+    process_directories(base_dir, create=True)
 
     palette = palettes_8bit_rgb[palette_name] if palette_name else None
     palette = 'extract' if extract_palette else palette
