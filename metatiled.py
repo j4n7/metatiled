@@ -605,7 +605,47 @@ def process_tileset(image_path):
     return tiles
 
 
-def merge_tilesets(gfx_dir):
+def merge_maps(map_dir, base_tileset_index, metatiles_index_mappings, ablk=False):
+    map_files = os.listdir(map_dir)
+    base_map_file = os.path.join(map_dir, map_files[base_tileset_index])
+
+    base_map = read_bin_file(base_map_file)
+    base_map_count = len(base_map)
+
+    for map_file in map_files:
+        if map_file != os.path.basename(base_map_file):
+            file_path = os.path.join(map_dir, map_file)
+            map = read_bin_file(file_path)
+
+            new_map = []
+            for line in map:
+                line_length = len(line)
+                for i in range(line_length):
+                    mapped = False
+                    for mapping in metatiles_index_mappings:
+                        if line[i] in mapping:
+                            line[i] = mapping[line[i]]
+                            mapped = True
+                            break
+                    if not mapped:
+                        new_metatile_index = base_map_count + len(base_map)
+                        line[i] = new_metatile_index
+
+                new_map.append(line)
+
+            extension = 'ablk' if ablk else 'blk'
+
+            output_file_path = os.path.join(
+                map_dir, f"{os.path.splitext(map_file)[0]}Merged.{extension}")
+            with open(output_file_path, 'wb') as f:
+                for metatile in new_map:
+                    f.write(bytes(metatile))
+
+
+# blk -------------------------------------------------------------------------
+
+
+def merge_blk_tilesets(gfx_dir):
     tilesets = []
     palette_maps = []
     found_pal_file = False
@@ -689,7 +729,7 @@ def merge_tilesets(gfx_dir):
     return base_tileset_index, tiles_index_mappings
 
 
-def merge_metatiles(data_dir, base_tileset_index, tiles_index_mappings):
+def merge_blk_metatiles(data_dir, base_tileset_index, tiles_index_mappings):
     bin_files = [f for f in os.listdir(data_dir) if f.endswith('.bin')]
     base_metatiles_file = os.path.join(data_dir, bin_files[base_tileset_index])
 
@@ -732,39 +772,156 @@ def merge_metatiles(data_dir, base_tileset_index, tiles_index_mappings):
     return metatiles_index_mappings
 
 
-def merge_blks(map_dir, base_tileset_index, metatiles_index_mappings):
-    blk_files = os.listdir(map_dir)
-    base_blk_file = os.path.join(map_dir, blk_files[base_tileset_index])
+# ablk ------------------------------------------------------------------------
 
-    base_map = read_bin_file(base_blk_file)
-    base_map_count = len(base_map)
 
-    for blk_file in blk_files:
-        if blk_file != os.path.basename(base_blk_file):
-            file_path = os.path.join(map_dir, blk_file)
-            map = read_bin_file(file_path)
+def merge_ablk_tilesets(gfx_dir):
+    tilesets = []
+    found_pal_file = False
+    for filename in os.listdir(gfx_dir):
+        if filename.endswith('.png'):
+            tileset_path = os.path.join(gfx_dir, filename)
+            tiles = process_tileset(tileset_path)
+            tilesets.append(tiles)
+        elif filename.endswith('.pal') and not found_pal_file:
+            pal_file_path = os.path.join(gfx_dir, filename)
+            shutil.copy(pal_file_path, os.path.join(gfx_dir, 'merged.pal'))
+            found_pal_file = True
 
-            new_map = []
-            for line in map:
-                line_length = len(line)
-                for i in range(line_length):
-                    mapped = False
-                    for mapping in metatiles_index_mappings:
-                        if line[i] in mapping:
-                            line[i] = mapping[line[i]]
-                            mapped = True
+    base_tileset = max(tilesets, key=len)
+    base_tileset_index = tilesets.index(base_tileset)
+
+    tiles_index_mappings = [{} for _ in range(len(tilesets))]
+
+    for i, tileset in enumerate(tilesets):
+        if i == base_tileset_index:
+            continue
+
+        for tile_index, tile in enumerate(tileset):
+            for base_tile_index, base_tile in enumerate(base_tileset):
+                # TODO: to check if 2 tiles are equal it is also necessary to do an x ​​and/or y flip
+                if tile.tobytes() == base_tile.tobytes():
+                    tiles_index_mappings[i][tile_index] = base_tile_index
+
+                    # debug_dir = os.path.join(gfx_dir, 'debug')
+                    # os.makedirs(debug_dir, exist_ok=True)
+                    # debug_image = Image.new('RGB', (8, 16))
+                    # debug_image.paste(tile, (0, 0))
+                    # debug_image.paste(base_tile, (0, 8))
+                    # debug_image_path = os.path.join(debug_dir, f'match_{i}_{tile_index}_{base_tile_index}.png')
+                    # debug_image.save(debug_image_path)
+
+                    break
+
+    tile_width, tile_height = base_tileset[0].size
+    merged_tiles = base_tileset[:]
+    for i, tileset in enumerate(tilesets):
+        if i == base_tileset_index:
+            continue
+        for tile_index, tile in enumerate(tileset):
+            if tile_index not in tiles_index_mappings[i]:
+                tiles_index_mappings[i][tile_index] = len(merged_tiles)
+                merged_tiles.append(tile)
+
+    merged_width = tile_width * 16
+    merged_height = tile_height * ((len(merged_tiles) + 15) // 16)
+    merged_image = Image.new(
+        'RGB', (merged_width, merged_height), (255, 255, 255))
+
+    for idx, tile in enumerate(merged_tiles):
+        x = (idx % 16) * tile_width
+        y = (idx // 16) * tile_height
+        merged_image.paste(tile, (x, y))
+
+    merged_image_path = os.path.join(gfx_dir, 'merged.png')
+    merged_image.save(merged_image_path)
+
+    tiles_index_mappings = [mapping for i, mapping in enumerate(
+        tiles_index_mappings) if i != base_tileset_index]
+
+    return base_tileset_index, tiles_index_mappings
+
+
+def merge_ablk_metatiles(data_dir, base_tileset_index, tiles_index_mappings):
+    def get_tile_index_real(tile_index, tile_info):
+        tile_bank = (tile_info >> 3) & 1
+        if tile_bank == 1:
+            tile_index += 128  # $80 = 128
+
+        return tile_index
+
+    def get_tile_index_bank(tile_index_real, tile_info):
+        if tile_index_real >= 128:
+            tile_bank = 1
+            tile_index = tile_index_real - 128
+        else:
+            tile_bank = 0
+            tile_index = tile_index_real
+
+        if tile_bank == 1:
+            tile_info |= (1 << 3)
+        else:
+            tile_info &= ~(1 << 3)
+
+        return tile_index, tile_info
+
+    metatiles_files = [f for f in os.listdir(data_dir) if f.endswith('metatiles.bin')]
+    base_metatiles_file = os.path.join(data_dir, metatiles_files[base_tileset_index])
+
+    base_metatiles = read_bin_file(base_metatiles_file)
+    base_metatiles_count = len(base_metatiles)
+
+    attributes_files = [f for f in os.listdir(data_dir) if f.endswith('attributes.bin')]
+    base_attributes_file = os.path.join(data_dir, attributes_files[base_tileset_index])
+
+    base_attributes = read_bin_file(base_attributes_file)
+
+    metatiles_index_mappings = []
+
+    for filename in metatiles_files:
+        if filename != os.path.basename(base_metatiles_file):
+            file_path = os.path.join(data_dir, filename)
+            metatiles = read_bin_file(file_path)
+            attributes = read_bin_file(file_path.replace('metatiles.bin', 'attributes.bin'))
+
+            file_index_mapping = {}
+            for metatile_index, metatile in enumerate(metatiles):
+                metatile_attrs = attributes[metatile_index]
+                for i in range(16):
+                    tile_index = metatile[i]
+                    tile_info = metatile_attrs[i]
+                    tile_index_real = get_tile_index_real(tile_index, tile_info)
+                    for mapping in tiles_index_mappings:
+                        if tile_index_real in mapping:
+                            tile_index_bank = get_tile_index_bank(mapping[tile_index_real], tile_info)
+                            metatile[i] = tile_index_bank[0]
+                            metatile_attrs[i] = tile_index_bank[1]  # ! Does this update the original list?
                             break
-                    if not mapped:
-                        new_metatile_index = base_map_count + len(base_map)
-                        line[i] = new_metatile_index
+                match_found = False
+                for base_metatile_index, base_metatile in enumerate(base_metatiles[:base_metatiles_count]):
+                    if metatile == base_metatile and metatile_attrs == base_attributes[base_metatile_index]:
+                        file_index_mapping[metatile_index] = base_metatile_index
+                        match_found = True
+                        break
+                if not match_found:
+                    file_index_mapping[metatile_index] = len(base_metatiles)
+                    base_metatiles.append(metatile)
+                    base_attributes.append(metatile_attrs)
 
-                new_map.append(line)
+            if file_index_mapping:
+                metatiles_index_mappings.append(file_index_mapping)
 
-            output_file_path = os.path.join(
-                map_dir, f"{os.path.splitext(blk_file)[0]}Merged.blk")
-            with open(output_file_path, 'wb') as f:
-                for metatile in new_map:
-                    f.write(bytes(metatile))
+    output_file_path = os.path.join(data_dir, 'merged_metatiles.bin')
+    with open(output_file_path, 'wb') as f:
+        for metatile in base_metatiles:
+            f.write(bytes(metatile))
+
+    output_file_path = os.path.join(data_dir, 'merged_attributes.bin')
+    with open(output_file_path, 'wb') as f:
+        for attrs in base_attributes:
+            f.write(bytes(attrs))
+
+    return metatiles_index_mappings
 
 
 # FILES -----------------------------------------------------------------------
@@ -1031,10 +1188,15 @@ def main():
 
     if merge:
         data_dir, gfx_dir, map_dir = process_directories(base_dir)
-        base_tileset_index, tiles_index_mappings = merge_tilesets(gfx_dir)
-        metatiles_index_mappings = merge_metatiles(
-            data_dir, base_tileset_index, tiles_index_mappings)
-        merge_blks(map_dir, base_tileset_index, metatiles_index_mappings)
+        if not compress:
+            base_tileset_index, tiles_index_mappings = merge_blk_tilesets(gfx_dir)
+            metatiles_index_mappings = merge_blk_metatiles(
+                data_dir, base_tileset_index, tiles_index_mappings)
+        else:
+            base_tileset_index, tiles_index_mappings = merge_ablk_tilesets(gfx_dir)
+            metatiles_index_mappings = merge_ablk_metatiles(
+                data_dir, base_tileset_index, tiles_index_mappings)
+        merge_maps(map_dir, base_tileset_index, metatiles_index_mappings, ablk=True)
         return
 
     base_name = os.path.splitext(os.path.basename(map_path))[0]
