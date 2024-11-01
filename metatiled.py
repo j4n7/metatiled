@@ -799,18 +799,31 @@ def merge_ablk_tilesets(gfx_dir):
 
         for tile_index, tile in enumerate(tileset):
             for base_tile_index, base_tile in enumerate(base_tileset):
-                # TODO: to check if 2 tiles are equal it is also necessary to do an x ​​and/or y flip
+                # Compare the original tile
                 if tile.tobytes() == base_tile.tobytes():
-                    tiles_index_mappings[i][tile_index] = base_tile_index
+                    tiles_index_mappings[i][tile_index] = (
+                        base_tile_index, False, False)
+                    break
 
-                    # debug_dir = os.path.join(gfx_dir, 'debug')
-                    # os.makedirs(debug_dir, exist_ok=True)
-                    # debug_image = Image.new('RGB', (8, 16))
-                    # debug_image.paste(tile, (0, 0))
-                    # debug_image.paste(base_tile, (0, 8))
-                    # debug_image_path = os.path.join(debug_dir, f'match_{i}_{tile_index}_{base_tile_index}.png')
-                    # debug_image.save(debug_image_path)
+                # Compare the tile with flip x
+                tile_flipped_x = ImageOps.mirror(tile)
+                if tile_flipped_x.tobytes() == base_tile.tobytes():
+                    tiles_index_mappings[i][tile_index] = (
+                        base_tile_index, True, False)
+                    break
 
+                # Comparar the tile with flip y
+                tile_flipped_y = ImageOps.flip(tile)
+                if tile_flipped_y.tobytes() == base_tile.tobytes():
+                    tiles_index_mappings[i][tile_index] = (
+                        base_tile_index, False, True)
+                    break
+
+                # Comparar the tile with flip x and y
+                tile_flipped_xy = ImageOps.mirror(tile_flipped_y)
+                if tile_flipped_xy.tobytes() == base_tile.tobytes():
+                    tiles_index_mappings[i][tile_index] = (
+                        base_tile_index, True, True)
                     break
 
     tile_width, tile_height = base_tileset[0].size
@@ -820,7 +833,8 @@ def merge_ablk_tilesets(gfx_dir):
             continue
         for tile_index, tile in enumerate(tileset):
             if tile_index not in tiles_index_mappings[i]:
-                tiles_index_mappings[i][tile_index] = len(merged_tiles)
+                tiles_index_mappings[i][tile_index] = (
+                    len(merged_tiles), False, False)
                 merged_tiles.append(tile)
 
     merged_width = tile_width * 16
@@ -850,7 +864,8 @@ def merge_ablk_metatiles(data_dir, base_tileset_index, tiles_index_mappings):
 
         return tile_index
 
-    def get_tile_index_bank(tile_index_real, tile_info):
+    def set_tile(tile_index_mapping, tile_attrs):
+        tile_index_real, flip_x, flip_y = tile_index_mapping
         if tile_index_real >= 128:
             tile_bank = 1
             tile_index = tile_index_real - 128
@@ -859,20 +874,30 @@ def merge_ablk_metatiles(data_dir, base_tileset_index, tiles_index_mappings):
             tile_index = tile_index_real
 
         if tile_bank == 1:
-            tile_info |= (1 << 3)
+            tile_attrs |= (1 << 3)
         else:
-            tile_info &= ~(1 << 3)
+            tile_attrs &= ~(1 << 3)
 
-        return tile_index, tile_info
+        # Invert bits 5 and 6
+        if flip_x:
+            tile_attrs ^= (1 << 5)
+        if flip_y:
+            tile_attrs ^= (1 << 6)
 
-    metatiles_files = [f for f in os.listdir(data_dir) if f.endswith('metatiles.bin')]
-    base_metatiles_file = os.path.join(data_dir, metatiles_files[base_tileset_index])
+        return tile_index, tile_attrs
+
+    metatiles_files = [f for f in os.listdir(
+        data_dir) if f.endswith('metatiles.bin')]
+    base_metatiles_file = os.path.join(
+        data_dir, metatiles_files[base_tileset_index])
 
     base_metatiles = read_bin_file(base_metatiles_file)
     base_metatiles_count = len(base_metatiles)
 
-    attributes_files = [f for f in os.listdir(data_dir) if f.endswith('attributes.bin')]
-    base_attributes_file = os.path.join(data_dir, attributes_files[base_tileset_index])
+    attributes_files = [f for f in os.listdir(
+        data_dir) if f.endswith('attributes.bin')]
+    base_attributes_file = os.path.join(
+        data_dir, attributes_files[base_tileset_index])
 
     base_attributes = read_bin_file(base_attributes_file)
 
@@ -882,20 +907,23 @@ def merge_ablk_metatiles(data_dir, base_tileset_index, tiles_index_mappings):
         if filename != os.path.basename(base_metatiles_file):
             file_path = os.path.join(data_dir, filename)
             metatiles = read_bin_file(file_path)
-            attributes = read_bin_file(file_path.replace('metatiles.bin', 'attributes.bin'))
+            attributes = read_bin_file(file_path.replace(
+                'metatiles.bin', 'attributes.bin'))
 
             file_index_mapping = {}
             for metatile_index, metatile in enumerate(metatiles):
                 metatile_attrs = attributes[metatile_index]
                 for i in range(16):
                     tile_index = metatile[i]
-                    tile_info = metatile_attrs[i]
-                    tile_index_real = get_tile_index_real(tile_index, tile_info)
+                    tile_attrs = metatile_attrs[i]
+                    tile_index_real = get_tile_index_real(
+                        tile_index, tile_attrs)
                     for mapping in tiles_index_mappings:
                         if tile_index_real in mapping:
-                            tile_index_bank = get_tile_index_bank(mapping[tile_index_real], tile_info)
-                            metatile[i] = tile_index_bank[0]
-                            metatile_attrs[i] = tile_index_bank[1]  # ! Does this update the original list?
+                            tile_info = set_tile(
+                                mapping[tile_index_real], tile_attrs)
+                            metatile[i] = tile_info[0]
+                            metatile_attrs[i] = tile_info[1]
                             break
                 match_found = False
                 for base_metatile_index, base_metatile in enumerate(base_metatiles[:base_metatiles_count]):
@@ -1189,14 +1217,17 @@ def main():
     if merge:
         data_dir, gfx_dir, map_dir = process_directories(base_dir)
         if not compress:
-            base_tileset_index, tiles_index_mappings = merge_blk_tilesets(gfx_dir)
+            base_tileset_index, tiles_index_mappings = merge_blk_tilesets(
+                gfx_dir)
             metatiles_index_mappings = merge_blk_metatiles(
                 data_dir, base_tileset_index, tiles_index_mappings)
         else:
-            base_tileset_index, tiles_index_mappings = merge_ablk_tilesets(gfx_dir)
+            base_tileset_index, tiles_index_mappings = merge_ablk_tilesets(
+                gfx_dir)
             metatiles_index_mappings = merge_ablk_metatiles(
                 data_dir, base_tileset_index, tiles_index_mappings)
-        merge_maps(map_dir, base_tileset_index, metatiles_index_mappings, ablk=True)
+        merge_maps(map_dir, base_tileset_index,
+                   metatiles_index_mappings, ablk=True)
         return
 
     base_name = os.path.splitext(os.path.basename(map_path))[0]
