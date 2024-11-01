@@ -736,12 +736,30 @@ def merge_blk_metatiles(data_dir, base_tileset_index, tiles_index_mappings):
     base_metatiles = read_bin_file(base_metatiles_file)
     base_metatiles_count = len(base_metatiles)
 
+    collision_files = [f for f in os.listdir(
+        data_dir) if f.endswith('collision.asm')]
+    if len(collision_files) == 0 or len(collision_files) != len(bin_files):
+        raise SystemExit('[Error] Some collision files are missing.')
+
+    base_collision_file = os.path.join(
+        data_dir, collision_files[base_tileset_index])
+    with open(base_collision_file, 'r') as f:
+        base_collision_lines = [
+            line for line in f if line.startswith('\ttilecoll')]
+    new_collision_lines = base_collision_lines[:]
+
     metatiles_index_mappings = []
 
     for filename in bin_files:
         if filename != os.path.basename(base_metatiles_file):
             file_path = os.path.join(data_dir, filename)
             metatiles = read_bin_file(file_path)
+
+            collision_file_path = file_path.replace(
+                'metatiles.bin', 'collision.asm')
+            with open(collision_file_path, 'r') as f:
+                collision_lines = [
+                    line for line in f if line.startswith('\ttilecoll')]
 
             file_index_mapping = {}
             for metatile_index, metatile in enumerate(metatiles):
@@ -760,6 +778,7 @@ def merge_blk_metatiles(data_dir, base_tileset_index, tiles_index_mappings):
                 if not match_found:
                     file_index_mapping[metatile_index] = len(base_metatiles)
                     base_metatiles.append(metatile)
+                    new_collision_lines.append(collision_lines[metatile_index])
 
             if file_index_mapping:
                 metatiles_index_mappings.append(file_index_mapping)
@@ -768,6 +787,11 @@ def merge_blk_metatiles(data_dir, base_tileset_index, tiles_index_mappings):
     with open(output_file_path, 'wb') as f:
         for metatile in base_metatiles:
             f.write(bytes(metatile))
+
+    output_file_path = os.path.join(data_dir, 'merged_collision.asm')
+    with open(output_file_path, 'w') as f:
+        for line in new_collision_lines:
+            f.write(line)
 
     return metatiles_index_mappings
 
@@ -861,7 +885,6 @@ def merge_ablk_metatiles(data_dir, base_tileset_index, tiles_index_mappings):
         tile_bank = (tile_info >> 3) & 1
         if tile_bank == 1:
             tile_index += 128  # $80 = 128
-
         return tile_index
 
     def set_tile(tile_index_mapping, tile_attrs):
@@ -901,6 +924,18 @@ def merge_ablk_metatiles(data_dir, base_tileset_index, tiles_index_mappings):
 
     base_attributes = read_bin_file(base_attributes_file)
 
+    collision_files = [f for f in os.listdir(
+        data_dir) if f.endswith('collision.asm')]
+    if len(collision_files) == 0 or len(collision_files) != len(metatiles_files):
+        raise SystemExit('[Error] Some collision files are missing.')
+
+    base_collision_file = os.path.join(
+        data_dir, collision_files[base_tileset_index])
+    with open(base_collision_file, 'r') as f:
+        base_collision_lines = [
+            line for line in f if line.startswith('\ttilecoll')]
+    new_collision_lines = base_collision_lines[:]
+
     metatiles_index_mappings = []
 
     for filename in metatiles_files:
@@ -909,6 +944,12 @@ def merge_ablk_metatiles(data_dir, base_tileset_index, tiles_index_mappings):
             metatiles = read_bin_file(file_path)
             attributes = read_bin_file(file_path.replace(
                 'metatiles.bin', 'attributes.bin'))
+
+            collision_file_path = file_path.replace(
+                'metatiles.bin', 'collision.asm')
+            with open(collision_file_path, 'r') as f:
+                collision_lines = [
+                    line for line in f if line.startswith('\ttilecoll')]
 
             file_index_mapping = {}
             for metatile_index, metatile in enumerate(metatiles):
@@ -935,6 +976,7 @@ def merge_ablk_metatiles(data_dir, base_tileset_index, tiles_index_mappings):
                     file_index_mapping[metatile_index] = len(base_metatiles)
                     base_metatiles.append(metatile)
                     base_attributes.append(metatile_attrs)
+                    new_collision_lines.append(collision_lines[metatile_index])
 
             if file_index_mapping:
                 metatiles_index_mappings.append(file_index_mapping)
@@ -948,6 +990,11 @@ def merge_ablk_metatiles(data_dir, base_tileset_index, tiles_index_mappings):
     with open(output_file_path, 'wb') as f:
         for attrs in base_attributes:
             f.write(bytes(attrs))
+
+    output_file_path = os.path.join(data_dir, 'merged_collision.asm')
+    with open(output_file_path, 'w') as f:
+        for line in new_collision_lines:
+            f.write(line)
 
     return metatiles_index_mappings
 
@@ -1221,13 +1268,16 @@ def main():
                 gfx_dir)
             metatiles_index_mappings = merge_blk_metatiles(
                 data_dir, base_tileset_index, tiles_index_mappings)
+            merge_maps(map_dir, base_tileset_index,
+                       metatiles_index_mappings)
         else:
             base_tileset_index, tiles_index_mappings = merge_ablk_tilesets(
                 gfx_dir)
             metatiles_index_mappings = merge_ablk_metatiles(
                 data_dir, base_tileset_index, tiles_index_mappings)
-        merge_maps(map_dir, base_tileset_index,
-                   metatiles_index_mappings, ablk=True)
+            merge_maps(map_dir, base_tileset_index,
+                       metatiles_index_mappings, ablk=True)
+        print('Merged!')
         return
 
     base_name = os.path.splitext(os.path.basename(map_path))[0]
